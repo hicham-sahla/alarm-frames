@@ -1,11 +1,51 @@
 <script lang="ts">
-  import type { ComponentContext } from '@ixon-cdk/types';
+  import { onMount } from "svelte";
+  import { AlarmsManager } from "./services/alarms-manager";
+  import { ApiService } from "./services/api.service";
+  import type { ComponentContext, Alarm } from "@ixon-cdk/types";
 
   export let context: ComponentContext;
+
+  let apiService: ApiService;
+  let alarmsManager: AlarmsManager;
+  let alarms: Alarm[] = [];
+  let loading = true;
+
+  onMount(async () => {
+    if (!context || !context.appData) {
+      console.error("Context or appData is undefined");
+      return;
+    }
+    apiService = new ApiService(context);
+    alarmsManager = new AlarmsManager(context);
+
+    loading = true;
+    try {
+      const agentId = "specified-agent-public-id"; // Replace with actual or fetched ID
+      console.log("Fetching all alarms for agent:", agentId);
+      alarms = await alarmsManager.getAllAlarmOccurrencesForAgent(agentId);
+      console.log("Alarms fetched:", alarms);
+    } catch (error) {
+      console.error("Failed to fetch alarms:", error);
+    }
+    loading = false;
+  });
 </script>
 
 <main>
-  <h1>This works!</h1>
+  {#if loading}
+    <p>Loading...</p>
+  {:else}
+    <ul>
+      {#each alarms as alarm}
+        <li>
+          <p>Alarm: {alarm.name}</p>
+          <p>Date: {alarm.occurrence?.occurredOn}</p>
+          <p>Severity: {alarm.severity}</p>
+        </li>
+      {/each}
+    </ul>
+  {/if}
 </main>
 
 <style lang="scss">
@@ -16,12 +56,6 @@
     padding: 1em;
     max-width: 240px;
     margin: 0 auto;
-  }
-  h1 {
-    color: $heading-color;
-    text-transform: uppercase;
-    font-size: 4em;
-    font-weight: 100;
   }
   @media (min-width: 640px) {
     main {
