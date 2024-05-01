@@ -1,5 +1,8 @@
-import type { ComponentContext } from "@ixon-cdk/types";
-import type { Alarm } from "../types"; // Ensure Alarm type is imported
+import type {
+  ComponentContext,
+  AgentDataAlarmOccurrence,
+} from "@ixon-cdk/types";
+import type { Alarm } from "../types";
 
 export class ApiService {
   context: ComponentContext;
@@ -14,7 +17,6 @@ export class ApiService {
       "Api-Company": context.appData.company.publicId,
       "Api-Version": "2",
     };
-    console.log("ApiService initialized with headers:", this.headers);
   }
 
   async fetch(url: string): Promise<any> {
@@ -32,22 +34,41 @@ export class ApiService {
   }
 
   async getAlarmsAndOccurrences(agentId: string): Promise<Alarm[]> {
-    const alarmsUrl = `https://portal.ixon.cloud:443/api/agents/${agentId}/data-alarms`;
-    const occurrencesUrl = `https://portal.ixon.cloud:443/api/agents/${agentId}/alarm-occurences`;
-    try {
-      const [alarms, occurrences] = await Promise.all([
-        this.fetch(alarmsUrl),
-        this.fetch(occurrencesUrl),
-      ]);
-      return alarms.data.map((alarm: any) => ({
-        ...alarm,
-        occurrences: occurrences.data.filter(
-          (occ: any) => occ.alarm.publicId === alarm.publicId
-        ),
-      }));
-    } catch (error) {
-      console.error("Failed to fetch alarms or occurrences:", error);
-      throw error;
+    const baseUrl = `https://portal.ixon.cloud:443/api/agents/${agentId}`;
+    const alarmsUrl = `${baseUrl}/data-alarms`;
+    const occurrencesUrl = `${baseUrl}/alarm-occurences`;
+
+    const [alarmsResponse, occurrencesResponse] = await Promise.all([
+      this.recursiveFetch(alarmsUrl),
+      this.recursiveFetch(occurrencesUrl),
+    ]);
+
+    return alarmsResponse.map((alarm: any) => ({
+      ...alarm,
+      occurrences: occurrencesResponse.filter(
+        (occ: AgentDataAlarmOccurrence) =>
+          occ.alarm && occ.alarm.publicId === alarm.publicId
+      ),
+    }));
+  }
+
+  async recursiveFetch(
+    url: string,
+    items: any[] = [],
+    pageAfter?: string
+  ): Promise<any[]> {
+    const requestUrl = new URL(url);
+    if (pageAfter) {
+      requestUrl.searchParams.set("page-after", pageAfter);
     }
+
+    const response = await this.fetch(requestUrl.toString());
+    const newData = items.concat(response.data);
+
+    if (response.moreAfter) {
+      return this.recursiveFetch(url, newData, response.moreAfter);
+    }
+
+    return newData;
   }
 }
