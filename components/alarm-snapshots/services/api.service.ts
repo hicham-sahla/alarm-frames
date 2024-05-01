@@ -32,8 +32,8 @@ export class ApiService {
   }
 
   async getAlarmsAndOccurrences(agentId: string): Promise<Alarm[]> {
-    const alarmsUrl = `${this.context.componentBaseUrl}/api/agents/${agentId}/data-alarms`;
-    const occurrencesUrl = `${this.context.componentBaseUrl}/api/agents/${agentId}/alarm-occurrences`;
+    const alarmsUrl = `https://portal.ixon.cloud:443/api/agents/${agentId}/data-alarms`;
+    const occurrencesUrl = `https://portal.ixon.cloud:443/api/agents/${agentId}/alarm-occurences`;
     try {
       const [alarms, occurrences] = await Promise.all([
         this.fetch(alarmsUrl),
