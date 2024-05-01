@@ -1,6 +1,6 @@
-// alarms-manager.ts
 import { ApiService } from "./api.service";
-import type { ComponentContext, Alarm } from "@ixon-cdk/types";
+import type { ComponentContext } from "@ixon-cdk/types";
+import type { Alarm } from "../types";
 
 export class AlarmsManager {
   apiService: ApiService;
@@ -12,22 +12,10 @@ export class AlarmsManager {
   }
 
   async getAllAlarmOccurrencesForAgent(agentId: string): Promise<Alarm[]> {
-    console.log("Fetching alarms for agent ID:", agentId);
-    return this.apiService
-      .getAllAlarmOccurrences(agentId)
-      .then((alarmOccurrences) =>
-        alarmOccurrences.map((occ) => ({
-          publicId: occ.publicId,
-          name: occ.alarm.name,
-          occurrence: occ,
-          agent: { publicId: agentId, name: "Unknown" }, // Simplification, add more details as needed
-          severity: occ.alarm.severity,
-          source: occ.alarm.source,
-        }))
-      )
-      .catch((error) => {
-        console.error("Error fetching alarms:", error);
-        return [];
-      });
+    console.log(
+      "Fetching all alarm data and occurrences for agent ID:",
+      agentId
+    );
+    return this.apiService.getAlarmsAndOccurrences(agentId);
   }
 }

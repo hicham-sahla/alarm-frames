@@ -1,49 +1,53 @@
-import type { ComponentContext, Agent } from "@ixon-cdk/types";
+import type { ComponentContext } from "@ixon-cdk/types";
+import type { Alarm } from "../types"; // Ensure Alarm type is imported
 
 export class ApiService {
-  private context: ComponentContext;
-  private headers: {};
+  context: ComponentContext;
+  headers: {};
 
   constructor(context: ComponentContext) {
-    if (!context || !context.appData) {
-      throw new Error("Context is not initialized or appData is missing");
-    }
     this.context = context;
     this.headers = {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${context.appData.accessToken.secretId}`,
+      Authorization: "Bearer " + context.appData.accessToken.secretId,
       "Api-Application": context.appData.apiAppId,
       "Api-Company": context.appData.company.publicId,
       "Api-Version": "2",
     };
+    console.log("ApiService initialized with headers:", this.headers);
   }
 
   async fetch(url: string): Promise<any> {
-    console.log("Fetching from URL:", url);
-    return fetch(url, {
-      method: "GET",
-      headers: this.headers,
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        console.log("Data fetched:", data);
-        return data.data;
+    console.log(`Fetching from URL: ${url}`);
+    return fetch(url, { method: "GET", headers: this.headers })
+      .then((response) => {
+        if (!response.ok)
+          throw new Error(`HTTP error! status: ${response.status}`);
+        return response.json();
       })
       .catch((error) => {
-        console.error("API fetch error:", error);
+        console.error(`Error fetching from ${url}:`, error);
         throw error;
       });
   }
 
-  async getAgentDetails(agentId: string): Promise<any> {
-    const url = `${this.context.componentBaseUrl}/api/agents/${agentId}`;
-    return this.fetch(url);
-  }
-
-  async getAllAlarmOccurrences(
-    agentId: string
-  ): Promise<AgentDataAlarmOccurrence[]> {
-    const url = `${this.context.componentBaseUrl}/api/agents/${agentId}/alarm-occurrences`;
-    return this.fetch(url);
+  async getAlarmsAndOccurrences(agentId: string): Promise<Alarm[]> {
+    const alarmsUrl = `${this.context.componentBaseUrl}/api/agents/${agentId}/data-alarms`;
+    const occurrencesUrl = `${this.context.componentBaseUrl}/api/agents/${agentId}/alarm-occurrences`;
+    try {
+      const [alarms, occurrences] = await Promise.all([
+        this.fetch(alarmsUrl),
+        this.fetch(occurrencesUrl),
+      ]);
+      return alarms.data.map((alarm: any) => ({
+        ...alarm,
+        occurrences: occurrences.data.filter(
+          (occ: any) => occ.alarm.publicId === alarm.publicId
+        ),
+      }));
+    } catch (error) {
+      console.error("Failed to fetch alarms or occurrences:", error);
+      throw error;
+    }
   }
 }

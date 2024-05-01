@@ -1,65 +1,52 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { AlarmsManager } from "./services/alarms-manager";
-  import { ApiService } from "./services/api.service";
-  import type { ComponentContext, Alarm } from "@ixon-cdk/types";
+  import type { ComponentContext } from "@ixon-cdk/types";
+  import type { Alarm } from "./types";
 
   export let context: ComponentContext;
 
-  let apiService: ApiService;
   let alarmsManager: AlarmsManager;
   let alarms: Alarm[] = [];
   let loading = true;
+  let agentId: string | null = sessionStorage.getItem("pv-preview-agent-id"); // Nullable string
 
-  onMount(async () => {
-    if (!context || !context.appData) {
-      console.error("Context or appData is undefined");
+  onMount(() => {
+    if (!context) {
+      console.error("Context is not initialized.");
       return;
     }
-    apiService = new ApiService(context);
+    if (!agentId) {
+      console.error("Agent ID is not found in sessionStorage.");
+      return;
+    }
     alarmsManager = new AlarmsManager(context);
+    fetchData(agentId);
+  });
 
+  async function fetchData(agentId: string) {
     loading = true;
     try {
-      const agentId = "specified-agent-public-id"; // Replace with actual or fetched ID
-      console.log("Fetching all alarms for agent:", agentId);
+      console.log("Fetching all alarms and occurrences for agent ID:", agentId);
       alarms = await alarmsManager.getAllAlarmOccurrencesForAgent(agentId);
-      console.log("Alarms fetched:", alarms);
+      console.log("Alarms and occurrences retrieved:", alarms);
     } catch (error) {
-      console.error("Failed to fetch alarms:", error);
+      console.error("Error fetching data:", error);
     }
     loading = false;
-  });
+  }
 </script>
 
 <main>
   {#if loading}
     <p>Loading...</p>
   {:else}
-    <ul>
-      {#each alarms as alarm}
-        <li>
-          <p>Alarm: {alarm.name}</p>
-          <p>Date: {alarm.occurrence?.occurredOn}</p>
-          <p>Severity: {alarm.severity}</p>
-        </li>
-      {/each}
-    </ul>
+    {#each alarms as alarm}
+      <li>
+        <p>Alarm: {alarm.name}</p>
+        <p>Date: {alarm.occurrences.map((occ) => occ.occurredOn).join(", ")}</p>
+        <p>Severity: {alarm.severity}</p>
+      </li>
+    {/each}
   {/if}
 </main>
-
-<style lang="scss">
-  $heading-color: #ff3e00;
-
-  main {
-    text-align: center;
-    padding: 1em;
-    max-width: 240px;
-    margin: 0 auto;
-  }
-  @media (min-width: 640px) {
-    main {
-      max-width: none;
-    }
-  }
-</style>
