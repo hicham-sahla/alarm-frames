@@ -9,7 +9,7 @@
   let alarmsManager: AlarmsManager;
   let alarms: Alarm[] = [];
   let loading = true;
-  let agentId: string | null = sessionStorage.getItem("pv-preview-agent-id"); // Nullable string
+  let agentId: string | null = sessionStorage.getItem("pv-preview-agent-id"); // Nullable string aanpassen met resource data client
 
   onMount(() => {
     if (!context) {
