@@ -14,6 +14,7 @@
     name: string;
     occurredOn: string;
     severity: string;
+    publicId: string;
   }[] = [];
   let loading = true;
   let agentId: string | null = null;
@@ -56,6 +57,7 @@
           name: alarm.name,
           occurredOn: formatDate(occ.occurredOn),
           severity: alarm.severity,
+          publicId: occ.publicId || "Unknown ID", // Include the publicId of the occurrence
         }))
       );
       console.log("Occurrences prepared:", occurrencesList);
@@ -81,6 +83,7 @@
         <li>
           <p>Alarm: {occurrence.name}</p>
           <p>Date: {occurrence.occurredOn}</p>
+          <p>ID: {occurrence.publicId}</p>
           <p>Severity: {occurrence.severity}</p>
         </li>
       {/each}
