@@ -10,7 +10,8 @@
 
   export let context: ComponentContext;
   let alarmsManager: AlarmsManager;
-  let occurrencesList: {
+
+  type Occurrence = {
     name: string;
     occurredOn: {
       fullDate: string;
@@ -19,7 +20,9 @@
     };
     severity: string;
     publicId: string;
-  }[] = [];
+  };
+
+  let occurrencesList: Occurrence[] = [];
   let loading = true;
   let tableWidth = 0;
   let tableScrollTop = 0;
@@ -31,6 +34,9 @@
   let search = "";
   let translations: Record<string, string>;
 
+  let from = "";
+  let to = "";
+
   onMount(async () => {
     alarmsManager = new AlarmsManager(context);
     translations = context.translate(
@@ -38,9 +44,21 @@
       undefined,
       { source: "global" }
     );
+
     if (context) {
-      const from = DateTime.now().minus({ weeks: 4 }).toUTC();
-      const to = DateTime.now().toUTC();
+      context.ontimerangechange = (newTimeRange) => {
+        if (newTimeRange) {
+          from = DateTime.fromMillis(newTimeRange.from, {
+            zone: context.appData.timeZone,
+          }).toISODate();
+          to = DateTime.fromMillis(newTimeRange.to, {
+            zone: context.appData.timeZone,
+          }).toISODate();
+        }
+      };
+
+      const fromDt = DateTime.now().minus({ weeks: 4 }).toUTC();
+      const toDt = DateTime.now().toUTC();
 
       const client = context.createResourceDataClient();
       client.query([{ selector: "Agent", fields: ["publicId"] }], (results) => {
@@ -52,7 +70,7 @@
         ) {
           agentId = results[0].data.publicId;
           if (agentId) {
-            fetchData(agentId, from.toJSDate(), to.toJSDate());
+            fetchData(agentId, fromDt.toJSDate(), toDt.toJSDate());
           }
         }
       });
@@ -60,6 +78,7 @@
       console.error("Context is not initialized.");
     }
   });
+
   function handleTableScroll(event: Event): void {
     tableScrollTop = (event.target as HTMLDivElement).scrollTop;
   }
@@ -90,13 +109,71 @@
     if (!dateString) {
       return { fullDate: "No Date Provided", dateOnly: "", timeOnly: "" };
     }
-
     const dt = DateTime.fromISO(dateString);
     return {
-      fullDate: dt.toFormat("dd-MM-yyyy HH:mm"),
-      dateOnly: dt.toFormat("dd-MM-yyyy"),
+      fullDate: dt.toISO(),
+      dateOnly: dt.toISODate(),
       timeOnly: dt.toFormat("HH:mm"),
     };
+  }
+
+  // Use the Occurrence type for the function parameter
+  function selectOccurrence(occurrence: Occurrence) {
+    console.log("Selected occurrence:", occurrence);
+    if (
+      !occurrence ||
+      !occurrence.occurredOn ||
+      !occurrence.occurredOn.fullDate
+    ) {
+      console.error("Invalid occurrence data");
+      return;
+    }
+
+    console.log("Attempting to parse date:", occurrence.occurredOn.fullDate);
+    const startTime = DateTime.fromISO(occurrence.occurredOn.fullDate, {
+      zone: context.appData.timeZone,
+    });
+    console.log("Parsed Start Time:", startTime.toString());
+
+    if (!startTime.isValid) {
+      console.error(
+        "Failed to parse the start time:",
+        occurrence.occurredOn.fullDate
+      );
+      return;
+    }
+
+    const endTime = startTime.plus({ hours: 1 });
+    console.log("Calculated End Time:", endTime.toString());
+
+    if (startTime.isValid && endTime.isValid) {
+      context.setTimeRange({
+        from: startTime.toMillis(),
+        to: endTime.toMillis(),
+      });
+    } else {
+      console.error("Invalid dates provided for time range.");
+    }
+  }
+
+  function updateTimeRange() {
+    if (!from || !to) return;
+
+    context.setTimeRange({
+      from: DateTime.fromISO(from, {
+        zone: context.appData.timeZone,
+      }).toMillis(),
+      to: DateTime.fromISO(to, { zone: context.appData.timeZone }).toMillis(),
+    });
+  }
+
+  $: if (context && context.timeRange) {
+    from = DateTime.fromMillis(context.timeRange.from, {
+      zone: context.appData.timeZone,
+    }).toISODate();
+    to = DateTime.fromMillis(context.timeRange.to, {
+      zone: context.appData.timeZone,
+    }).toISODate();
   }
 
   $: filteredOccurrences = occurrencesList.filter((occ) => {
@@ -110,8 +187,8 @@
       timeOnly.toLowerCase(),
     ].some((field) => field.includes(search.toLowerCase()));
   });
+
   function toggleRefresh(): void {
-    // Make sure agentId is available and then call fetchData with the correct parameters
     if (agentId) {
       const from = DateTime.now().minus({ weeks: 4 }).toJSDate();
       const to = DateTime.now().toJSDate();
@@ -179,7 +256,7 @@
           />
         </div>
         <div class="refresh-container">
-          <button class="refresh ripple" on:click={() => toggleRefresh()}>
+          <button class="refresh ripple" on:click={toggleRefresh}>
             <svg width="24" height="24" viewBox="0 -960 960 960">
               <path
                 d="M204-318q-22-38-33-78t-11-82q0-134 93-228t227-94h7l-64-64 56-56 160 160-160 160-56-56 64-64h-7q-100 0-170 70.5T240-478q0 26 6 51t18 49l-60 60ZM481-40 321-200l160-160 56 56-64 64h7q100 0 170-70.5T720-482q0-26-6-51t-18-49l60-60q22 38 33 78t11 82q0 134-93 228t-227 94h-7l64 64-56 56Z"
@@ -190,7 +267,7 @@
             class={doAutoRefresh
               ? "auto-refresh ripple active"
               : "auto-refresh ripple"}
-            on:click={() => toggleAutoRefresh()}
+            on:click={toggleAutoRefresh}
           >
             30s
           </button>
@@ -201,7 +278,6 @@
       {#if tableScrollTop > 0}
         <div class="table-header-drop-shadow" style="width: {tableWidth}px" />
       {/if}
-      <!-- {#if visibleAlarms.length || !search} -->
       <div
         class="table-wrapper"
         bind:clientWidth={tableWidth}
@@ -218,7 +294,7 @@
           </thead>
           <tbody>
             {#each filteredOccurrences as occurrence}
-              <tr>
+              <tr on:click={() => selectOccurrence(occurrence)}>
                 <td>{occurrence.publicId}</td>
                 <td>{occurrence.name}</td>
                 <td>{occurrence.occurredOn.fullDate}</td>
@@ -228,11 +304,6 @@
           </tbody>
         </table>
       </div>
-      <!-- {:else}
-        <div class="no-search-results">
-          <p>{translations.NO_OCCURRENCES_FOUND}</p>
-        </div> -->
-      <!-- {/if} -->
     </div>
   {/if}
 </div>
@@ -249,23 +320,19 @@
     text-align: left; /* Aligns text to the left */
     vertical-align: top; /* Aligns content to the top of the cell */
   }
-
   .base-table {
     border-collapse: collapse; /* Ensures borders between cells are merged */
   }
   .card-header {
     margin-bottom: 8px;
-
     .actions-top {
       display: flex;
       flex-direction: row;
     }
   }
-
   .card-content {
     position: relative;
   }
-
   .loading-state {
     width: inherit;
     height: inherit;
@@ -273,7 +340,6 @@
     justify-content: center;
     align-items: center;
   }
-
   .table-wrapper {
     position: absolute;
     left: 0;
@@ -284,7 +350,6 @@
     overflow: auto;
     overflow-anchor: none;
   }
-
   .table-header-drop-shadow {
     position: absolute;
     z-index: 10;
@@ -295,20 +360,16 @@
     background: var(--basic);
     box-shadow: 0 2px 2px 0 var(--card-border-color);
   }
-
   table.base-table {
     width: 100%;
-
     tr td {
       font-size: 14px;
       white-space: nowrap;
       padding-right: 24px;
     }
-
     thead {
       tr {
         border-bottom: none;
-
         th {
           position: sticky;
           white-space: nowrap;
@@ -321,13 +382,11 @@
         }
       }
     }
-
     tbody tr:hover {
       background-color: rgb(0 0 0 / 4%) !important;
       cursor: pointer;
     }
   }
-
   .no-search-results {
     font-size: 14px;
     margin-bottom: 16px;
