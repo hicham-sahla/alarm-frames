@@ -12,7 +12,11 @@
   let alarmsManager: AlarmsManager;
   let occurrencesList: {
     name: string;
-    occurredOn: string;
+    occurredOn: {
+      fullDate: string;
+      dateOnly: string;
+      timeOnly: string;
+    };
     severity: string;
     publicId: string;
   }[] = [];
@@ -82,16 +86,36 @@
     loading = false;
   }
 
-  function formatDate(dateString: string | undefined): string {
-    return dateString
-      ? DateTime.fromISO(dateString).toFormat("dd-MM-yyyy HH:mm")
-      : "No Date Provided";
+  function formatDate(
+    occurredOn:
+      | string
+      | { fullDate: string; dateOnly: string; timeOnly: string }
+  ) {
+    if (typeof occurredOn === "string") {
+      if (!occurredOn)
+        return { fullDate: "No Date Provided", dateOnly: "", timeOnly: "" };
+
+      const dt = DateTime.fromISO(occurredOn);
+      return {
+        fullDate: dt.toFormat("dd-MM-yyyy HH:mm"),
+        dateOnly: dt.toFormat("dd-MM-yyyy"),
+        timeOnly: dt.toFormat("HH:mm"),
+      };
+    } else {
+      return occurredOn; // Return the object if it's already formatted
+    }
   }
 
   $: filteredOccurrences = occurrencesList.filter((occ) => {
-    return [occ.name, occ.severity].some((prop) =>
-      prop.toLowerCase().includes(search.toLowerCase())
-    );
+    const { fullDate, dateOnly, timeOnly } = occ.occurredOn; // Directly use the object
+    return [
+      occ.name.toLowerCase(),
+      occ.severity.toLowerCase(),
+      occ.publicId.toLowerCase(),
+      fullDate.toLowerCase(),
+      dateOnly.toLowerCase(),
+      timeOnly.toLowerCase(),
+    ].some((field) => field.includes(search.toLowerCase()));
   });
   function toggleRefresh(): void {
     // Make sure agentId is available and then call fetchData with the correct parameters
@@ -204,7 +228,7 @@
               <tr>
                 <td>{occurrence.publicId}</td>
                 <td>{occurrence.name}</td>
-                <td>{occurrence.occurredOn}</td>
+                <td>{occurrence.occurredOn.fullDate}</td>
                 <td>{occurrence.severity}</td>
               </tr>
             {/each}
