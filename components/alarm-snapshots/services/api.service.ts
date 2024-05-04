@@ -3,6 +3,7 @@ import type {
   AgentDataAlarmOccurrence,
 } from "@ixon-cdk/types";
 import type { Alarm } from "../types";
+import { DateTime } from "luxon";
 
 export class ApiService {
   context: ComponentContext;
@@ -34,24 +35,34 @@ export class ApiService {
       });
   }
 
-  async getAlarmsAndOccurrences(agentId: string): Promise<Alarm[]> {
+  async getAlarmsAndOccurrences(
+    agentId: string,
+    from: Date,
+    to: Date
+  ): Promise<Alarm[]> {
+    const currentDate = DateTime.fromJSDate(to).toUTC();
+    const fourWeeksAgo = DateTime.fromJSDate(from).toUTC();
+
     const alarmsUrl = this.context.getApiUrl("AgentDataAlarmList", { agentId });
     const occurrencesUrl = this.context.getApiUrl(
       "AgentDataAlarmOccurrenceList",
       { agentId }
     );
 
+    const dateFilter = [
+      `gte(occurredOn,"${fourWeeksAgo.toISO()}")`,
+      `lte(occurredOn,"${currentDate.toISO()}")`,
+    ];
+
     const [alarmsResponse, occurrencesResponse] = await Promise.all([
       this.recursiveFetch(alarmsUrl, ["name", "severity"]),
       this.recursiveFetch(
         occurrencesUrl,
         ["alarm.publicId", "occurredOn"],
-        [
-          'gte(occurredOn,"2024-04-01T00:00:00Z")',
-          'lte(occurredOn,"2024-05-02T00:00:00Z")',
-        ]
+        dateFilter
       ),
     ]);
+
     return alarmsResponse.map((alarm: any) => ({
       ...alarm,
       occurrences: occurrencesResponse.filter(
@@ -64,7 +75,6 @@ export class ApiService {
   async recursiveFetch(
     url: string,
     fields: string[] = [],
-    filters: string[] = [],
     items: any[] = [],
     pageAfter?: string
   ): Promise<any[]> {
@@ -75,26 +85,13 @@ export class ApiService {
     if (fields.length) {
       requestUrl.searchParams.set("fields", fields.join(","));
     }
-    if (filters.length) {
-      // for each filter set filters=filter1&filters=filter2
-      filters.forEach((filter) => {
-        requestUrl.searchParams.append("filters", filter);
-      });
-    }
 
     const response = await this.fetch(requestUrl.toString());
     const newData = items.concat(response.data);
 
     if (response.moreAfter) {
-      return this.recursiveFetch(
-        url,
-        fields,
-        filters,
-        newData,
-        response.moreAfter
-      );
+      return this.recursiveFetch(url, fields, newData, response.moreAfter);
     }
-
     return newData;
   }
 }

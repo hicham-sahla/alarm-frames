@@ -21,5 +21,8 @@
     "@ixon-cdk/svelte-builder": "^1.6.0",
     "@ixon-cdk/templates": "^1.6.0",
     "@ixon-cdk/types": "^1.6.0"
+  },
+  "dependencies": {
+    "luxon": "^3.4.4"
   }
 }

@@ -1,11 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { DateTime } from "luxon";
   import { AlarmsManager } from "./services/alarms-manager";
-  import type {
-    ComponentContext,
-    ResourceData,
-    ResourceDataResult,
-  } from "@ixon-cdk/types";
+  import type { ComponentContext } from "@ixon-cdk/types";
   import type { Alarm } from "./types";
 
   export let context: ComponentContext;
@@ -16,16 +13,14 @@
   let agentId: string | null = null;
 
   onMount(async () => {
-    if (!context) {
-      console.error("Context is not initialized.");
-      return;
-    }
+    alarmsManager = new AlarmsManager(context);
+    if (context) {
+      const from = DateTime.now().minus({ weeks: 4 }).toUTC();
+      const to = DateTime.now().toUTC();
+      console.log(`Filtering from ${from.toISO()} to ${to.toISO()}`);
 
-    const client = context.createResourceDataClient();
-    // Properly handling the result based on the ResourceData interface
-    client.query(
-      [{ selector: "Agent", fields: ["publicId"] }],
-      (results: ResourceDataResult<ResourceData.Agent>[]) => {
+      const client = context.createResourceDataClient();
+      client.query([{ selector: "Agent", fields: ["publicId"] }], (results) => {
         if (
           results &&
           results.length > 0 &&
@@ -34,29 +29,23 @@
         ) {
           agentId = results[0].data.publicId;
           if (agentId) {
-            initializeAndFetchData(agentId);
-          } else {
-            console.error("Agent ID retrieved is null.");
+            fetchData(agentId, from.toJSDate(), to.toJSDate());
           }
-        } else {
-          console.error(
-            "Failed to retrieve Agent ID or data is structured incorrectly."
-          );
         }
-      }
-    );
+      });
+    } else {
+      console.error("Context is not initialized.");
+    }
   });
 
-  async function initializeAndFetchData(agentId: string) {
-    alarmsManager = new AlarmsManager(context);
-    await fetchData(agentId);
-  }
-
-  async function fetchData(agentId: string) {
+  async function fetchData(agentId: string, from: Date, to: Date) {
     loading = true;
     try {
-      console.log("Fetching all alarms and occurrences for agent ID:", agentId);
-      alarms = await alarmsManager.getAllAlarmOccurrencesForAgent(agentId);
+      alarms = await alarmsManager.getAllAlarmOccurrencesForAgent(
+        agentId,
+        from,
+        to
+      );
       console.log("Alarms and occurrences retrieved:", alarms);
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -69,12 +58,16 @@
   {#if loading}
     <p>Loading...</p>
   {:else}
-    {#each alarms as alarm}
-      <li>
-        <p>Alarm: {alarm.name}</p>
-        <p>Date: {alarm.occurrences.map((occ) => occ.occurredOn).join(", ")}</p>
-        <p>Severity: {alarm.severity}</p>
-      </li>
-    {/each}
+    <ul>
+      {#each alarms as alarm}
+        <li>
+          <p>Alarm: {alarm.name}</p>
+          <p>
+            Date: {alarm.occurrences.map((occ) => occ.occurredOn).join(", ")}
+          </p>
+          <p>Severity: {alarm.severity}</p>
+        </li>
+      {/each}
+    </ul>
   {/if}
 </main>
