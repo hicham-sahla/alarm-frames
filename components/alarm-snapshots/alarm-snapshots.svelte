@@ -2,13 +2,19 @@
   import { onMount } from "svelte";
   import { DateTime } from "luxon";
   import { AlarmsManager } from "./services/alarms-manager";
-  import type { ComponentContext } from "@ixon-cdk/types";
+  import type {
+    ComponentContext,
+    AgentDataAlarmOccurrence,
+  } from "@ixon-cdk/types";
   import type { Alarm } from "./types";
 
   export let context: ComponentContext;
-
   let alarmsManager: AlarmsManager;
-  let alarms: Alarm[] = [];
+  let occurrencesList: {
+    name: string;
+    occurredOn: string;
+    severity: string;
+  }[] = [];
   let loading = true;
   let agentId: string | null = null;
 
@@ -17,7 +23,6 @@
     if (context) {
       const from = DateTime.now().minus({ weeks: 4 }).toUTC();
       const to = DateTime.now().toUTC();
-      console.log(`Filtering from ${from.toISO()} to ${to.toISO()}`);
 
       const client = context.createResourceDataClient();
       client.query([{ selector: "Agent", fields: ["publicId"] }], (results) => {
@@ -41,16 +46,29 @@
   async function fetchData(agentId: string, from: Date, to: Date) {
     loading = true;
     try {
-      alarms = await alarmsManager.getAllAlarmOccurrencesForAgent(
+      let alarms = await alarmsManager.getAllAlarmOccurrencesForAgent(
         agentId,
         from,
         to
       );
-      console.log("Alarms and occurrences retrieved:", alarms);
+      occurrencesList = alarms.flatMap((alarm) =>
+        alarm.occurrences.map((occ) => ({
+          name: alarm.name,
+          occurredOn: formatDate(occ.occurredOn),
+          severity: alarm.severity,
+        }))
+      );
+      console.log("Occurrences prepared:", occurrencesList);
     } catch (error) {
       console.error("Error fetching data:", error);
     }
     loading = false;
+  }
+
+  function formatDate(dateString: string | undefined): string {
+    return dateString
+      ? DateTime.fromISO(dateString).toFormat("dd-MM-yyyy HH:mm")
+      : "No Date Provided";
   }
 </script>
 
@@ -59,13 +77,11 @@
     <p>Loading...</p>
   {:else}
     <ul>
-      {#each alarms as alarm}
+      {#each occurrencesList as occurrence}
         <li>
-          <p>Alarm: {alarm.name}</p>
-          <p>
-            Date: {alarm.occurrences.map((occ) => occ.occurredOn).join(", ")}
-          </p>
-          <p>Severity: {alarm.severity}</p>
+          <p>Alarm: {occurrence.name}</p>
+          <p>Date: {occurrence.occurredOn}</p>
+          <p>Severity: {occurrence.severity}</p>
         </li>
       {/each}
     </ul>
