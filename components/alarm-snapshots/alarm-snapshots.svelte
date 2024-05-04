@@ -75,7 +75,7 @@
       occurrencesList = alarms.flatMap((alarm) =>
         alarm.occurrences.map((occ) => ({
           name: alarm.name,
-          occurredOn: formatDate(occ.occurredOn),
+          occurredOn: formatDate(occ.occurredOn), // Ensure this always returns an object
           severity: alarm.severity,
           publicId: occ.publicId || "Unknown ID",
         }))
@@ -86,24 +86,17 @@
     loading = false;
   }
 
-  function formatDate(
-    occurredOn:
-      | string
-      | { fullDate: string; dateOnly: string; timeOnly: string }
-  ) {
-    if (typeof occurredOn === "string") {
-      if (!occurredOn)
-        return { fullDate: "No Date Provided", dateOnly: "", timeOnly: "" };
-
-      const dt = DateTime.fromISO(occurredOn);
-      return {
-        fullDate: dt.toFormat("dd-MM-yyyy HH:mm"),
-        dateOnly: dt.toFormat("dd-MM-yyyy"),
-        timeOnly: dt.toFormat("HH:mm"),
-      };
-    } else {
-      return occurredOn; // Return the object if it's already formatted
+  function formatDate(dateString: string | undefined) {
+    if (!dateString) {
+      return { fullDate: "No Date Provided", dateOnly: "", timeOnly: "" };
     }
+
+    const dt = DateTime.fromISO(dateString);
+    return {
+      fullDate: dt.toFormat("dd-MM-yyyy HH:mm"),
+      dateOnly: dt.toFormat("dd-MM-yyyy"),
+      timeOnly: dt.toFormat("HH:mm"),
+    };
   }
 
   $: filteredOccurrences = occurrencesList.filter((occ) => {
