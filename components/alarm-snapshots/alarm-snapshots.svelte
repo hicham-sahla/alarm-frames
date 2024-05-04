@@ -17,6 +17,7 @@
       fullDate: string;
       dateOnly: string;
       timeOnly: string;
+      formattedDate: string; // User-friendly formatted date
     };
     severity: string;
     publicId: string;
@@ -107,13 +108,20 @@
 
   function formatDate(dateString: string | undefined) {
     if (!dateString) {
-      return { fullDate: "No Date Provided", dateOnly: "", timeOnly: "" };
+      // Return a default object where no fields are undefined
+      return {
+        fullDate: "No Date Provided",
+        dateOnly: "No Date Provided",
+        timeOnly: "No Time Provided",
+        formattedDate: "No Date Provided", // Make sure this is not undefined
+      };
     }
     const dt = DateTime.fromISO(dateString);
     return {
       fullDate: dt.toISO(),
       dateOnly: dt.toISODate(),
       timeOnly: dt.toFormat("HH:mm"),
+      formattedDate: dt.toFormat("dd-MM-yyyy HH:mm"), // Ensure formattedDate is always defined
     };
   }
 
@@ -297,7 +305,8 @@
               <tr on:click={() => selectOccurrence(occurrence)}>
                 <td>{occurrence.publicId}</td>
                 <td>{occurrence.name}</td>
-                <td>{occurrence.occurredOn.fullDate}</td>
+                <td>{occurrence.occurredOn.formattedDate}</td>
+                <!-- Display the formatted date -->
                 <td>{occurrence.severity}</td>
               </tr>
             {/each}
