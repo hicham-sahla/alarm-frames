@@ -56,6 +56,11 @@
 
   let selectedTimeRange: TimeRanges = TimeRanges.FourWeeks;
 
+  let isToDate = false; // Default to adjusting 'from'
+
+  function toggleDateAdjustment() {
+    adjustmentTarget = isToDate ? "to" : "from";
+  }
   let minuteAdjustment: number = 15; // Default adjustment period in minutes
   let adjustmentTarget: "from" | "to" = "from"; // Default to adjusting 'from' date
 
@@ -301,14 +306,22 @@
   {:else}
     <div class="card-header with-actions">
       <h3 class="card-title" data-testid="active-alarms-overview-card-title">
-        Alarm snapshot
+        Alarm snapshots
       </h3>
       <div class="actions-top">
         <div class="time-adjustment">
-          <select bind:value={adjustmentTarget}>
-            <option value="from">From Date</option>
-            <option value="to">To Date</option>
-          </select>
+          <div class="input-switch">
+            <label class="switch-label">From Date</label>
+            <input
+              type="checkbox"
+              id="switchy"
+              class="input"
+              bind:checked={isToDate}
+              on:change={toggleDateAdjustment}
+            />
+            <label for="switchy" class="switch"></label>
+            <label class="switch-label">To Date</label>
+          </div>
           <div class="button-group">
             <button on:click={decrementTimeRange}
               ><svg
@@ -427,6 +440,60 @@
   @import "./styles/ripple";
   @import "./styles/search-input";
   .time-adjustment {
+    .input-switch {
+      display: flex;
+      align-items: center;
+      position: relative;
+      user-select: none;
+      font-family: inherit; // Ensures the switch uses the app's default font
+      margin-top: 13px;
+
+      .switch-label {
+        color: var(--text-color, #333);
+        padding: 0 10px;
+      }
+
+      .input {
+        opacity: 0;
+        position: absolute;
+        z-index: -1;
+      }
+
+      .switch {
+        cursor: pointer;
+        width: 50px;
+        height: 25px;
+        background: var(--deactivated-color, #34a45c); // Default background
+        border-radius: 2px; // Reduced for a more rectangular look
+        position: relative;
+        transition: background-color 0.3s ease;
+
+        &:before {
+          content: "";
+          position: absolute;
+          top: 2px;
+          left: 2px;
+          width: 21px;
+          height: 21px;
+          background: white;
+          border-radius: 0px; // Zero for square toggle
+          transition:
+            transform 0.3s ease,
+            background-color 0.3s ease;
+        }
+      }
+
+      .input:checked + .switch {
+        background: var(
+          --activated-color,
+          #739ce6
+        ); // Change background on active
+
+        &:before {
+          transform: translateX(25px); // Move the toggle to the right
+        }
+      }
+    }
     display: flex;
     align-items: center;
     .button-group {
