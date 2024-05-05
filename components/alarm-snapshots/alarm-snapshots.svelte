@@ -309,7 +309,11 @@
           >
             30s
           </button>
-          <select bind:value={selectedTimeRange} on:change={updateDateRange}>
+          <select
+            class="timerange-select"
+            bind:value={selectedTimeRange}
+            on:change={updateDateRange}
+          >
             <option value="4 weeks">Last 4 Weeks</option>
             <option value="3 months">Last 3 Months</option>
             <option value="6 months">Last 6 Months</option>
@@ -342,7 +346,6 @@
                 <td>{occurrence.publicId}</td>
                 <td>{occurrence.name}</td>
                 <td>{occurrence.occurredOn.formattedDate}</td>
-                <!-- Display the formatted date -->
                 <td>{occurrence.severity}</td>
               </tr>
             {/each}
@@ -360,6 +363,17 @@
   @import "./styles/refresh";
   @import "./styles/ripple";
   @import "./styles/search-input";
+
+  .timerange-select {
+    background: var(--basic);
+    border: 1px solid var(--card-border-color);
+    border-radius: 4px;
+    color: var(--text-color);
+    font-size: 14px;
+    padding: 4px 8px;
+    margin-left: 8px;
+    margin-right: 6px;
+  }
   .base-table th,
   .base-table td {
     text-align: left; /* Aligns text to the left */
