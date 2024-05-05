@@ -72,10 +72,21 @@
       { source: "global" }
     );
 
+    // Retrieve from local storage
+    const savedDate = localStorage.getItem("snapshot-date");
+    if (savedDate) {
+      const startDate = DateTime.fromISO(savedDate, {
+        zone: context.appData.timeZone,
+      });
+      context.setTimeRange({
+        from: startDate.toMillis(),
+        to: startDate.plus({ hours: 1 }).toMillis(),
+      });
+    }
+
     if (context) {
       context.ontimerangechange = (newTimeRange) => {
         if (newTimeRange) {
-          // Maintain full datetime strings
           from = DateTime.fromMillis(newTimeRange.from, {
             zone: context.appData.timeZone,
           }).toISO();
@@ -87,7 +98,6 @@
 
       const fromDt = DateTime.now().minus({ weeks: 4 }).toUTC();
       const toDt = DateTime.now().toUTC();
-
       const client = context.createResourceDataClient();
       client.query([{ selector: "Agent", fields: ["publicId"] }], (results) => {
         if (
@@ -176,7 +186,6 @@
       return;
     }
 
-    console.log("Attempting to parse date:", occurrence.occurredOn.fullDate);
     const startTime = DateTime.fromISO(occurrence.occurredOn.fullDate, {
       zone: context.appData.timeZone,
     });
@@ -189,6 +198,9 @@
       );
       return;
     }
+
+    // Save to local storage
+    localStorage.setItem("snapshot-date", startTime.toISO());
 
     const endTime = startTime.plus({ hours: 1 });
     console.log("Calculated End Time:", endTime.toString());
