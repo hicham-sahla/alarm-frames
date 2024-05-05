@@ -40,8 +40,8 @@ export class ApiService {
     from: Date,
     to: Date
   ): Promise<Alarm[]> {
-    const currentDate = DateTime.fromJSDate(to).toUTC();
-    const fourWeeksAgo = DateTime.fromJSDate(from).toUTC();
+    const startDate = DateTime.fromJSDate(from).toUTC(); // Renamed from fourWeeksAgo
+    const endDate = DateTime.fromJSDate(to).toUTC(); // Renamed from currentDate
 
     const alarmsUrl = this.context.getApiUrl("AgentDataAlarmList", { agentId });
     const occurrencesUrl = this.context.getApiUrl(
@@ -50,8 +50,8 @@ export class ApiService {
     );
 
     const dateFilter = [
-      `gte(occurredOn,"${fourWeeksAgo.toISO()}")`,
-      `lte(occurredOn,"${currentDate.toISO()}")`,
+      `gte(occurredOn,"${startDate.toISO()}")`, // Use startDate
+      `lte(occurredOn,"${endDate.toISO()}")`, // Use endDate
     ];
 
     const [alarmsResponse, occurrencesResponse] = await Promise.all([

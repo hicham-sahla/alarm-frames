@@ -38,6 +38,24 @@
   let from = "";
   let to = "";
 
+  enum TimeRanges {
+    FourWeeks = "4 weeks",
+    ThreeMonths = "3 months",
+    SixMonths = "6 months",
+    OneYear = "1 year",
+  }
+
+  const timeRangeOptions: {
+    [K in TimeRanges]: { weeks?: number; months?: number; years?: number };
+  } = {
+    [TimeRanges.FourWeeks]: { weeks: 4 },
+    [TimeRanges.ThreeMonths]: { months: 3 },
+    [TimeRanges.SixMonths]: { months: 6 },
+    [TimeRanges.OneYear]: { years: 1 },
+  };
+
+  let selectedTimeRange: TimeRanges = TimeRanges.FourWeeks;
+
   onMount(async () => {
     alarmsManager = new AlarmsManager(context);
     translations = context.translate(
@@ -79,6 +97,18 @@
       console.error("Context is not initialized.");
     }
   });
+
+  function updateDateRange() {
+    if (!agentId) {
+      console.error("Agent ID is null or undefined.");
+      return;
+    }
+
+    const duration = timeRangeOptions[selectedTimeRange];
+    const fromDt = DateTime.now().minus(duration).toUTC();
+    const toDt = DateTime.now().toUTC();
+    fetchData(agentId, fromDt.toJSDate(), toDt.toJSDate());
+  }
 
   function handleTableScroll(event: Event): void {
     tableScrollTop = (event.target as HTMLDivElement).scrollTop;
@@ -279,6 +309,12 @@
           >
             30s
           </button>
+          <select bind:value={selectedTimeRange} on:change={updateDateRange}>
+            <option value="4 weeks">Last 4 Weeks</option>
+            <option value="3 months">Last 3 Months</option>
+            <option value="6 months">Last 6 Months</option>
+            <option value="1 year">Last 1 Year</option>
+          </select>
         </div>
       </div>
     </div>
