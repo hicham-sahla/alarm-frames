@@ -56,6 +56,9 @@
 
   let selectedTimeRange: TimeRanges = TimeRanges.FourWeeks;
 
+  let minuteAdjustment: number = 15; // Default adjustment period in minutes
+  let adjustmentTarget: "from" | "to" = "from"; // Default to adjusting 'from' date
+
   onMount(async () => {
     alarmsManager = new AlarmsManager(context);
     translations = context.translate(
@@ -67,12 +70,13 @@
     if (context) {
       context.ontimerangechange = (newTimeRange) => {
         if (newTimeRange) {
+          // Maintain full datetime strings
           from = DateTime.fromMillis(newTimeRange.from, {
             zone: context.appData.timeZone,
-          }).toISODate();
+          }).toISO();
           to = DateTime.fromMillis(newTimeRange.to, {
             zone: context.appData.timeZone,
-          }).toISODate();
+          }).toISO();
         }
       };
 
@@ -194,15 +198,41 @@
     }
   }
 
-  function updateTimeRange() {
-    if (!from || !to) return;
+  function incrementTimeRange() {
+    adjustTimeRange(minuteAdjustment);
+  }
 
+  function decrementTimeRange() {
+    adjustTimeRange(-minuteAdjustment);
+  }
+
+  function adjustTimeRange(minutes: number) {
+    if (!agentId) {
+      console.error("Agent ID is null, cannot fetch data.");
+      return;
+    }
+
+    let newFrom = DateTime.fromISO(from, { zone: context.appData.timeZone });
+    let newTo = DateTime.fromISO(to, { zone: context.appData.timeZone });
+
+    if (adjustmentTarget === "from") {
+      newFrom = newFrom.plus({ minutes: minutes });
+    } else {
+      newTo = newTo.plus({ minutes: minutes });
+    }
+
+    // Update the global 'from' and 'to' ISO strings to full datetime
+    from = newFrom.toISO();
+    to = newTo.toISO();
+
+    // Set the new time range in context
     context.setTimeRange({
-      from: DateTime.fromISO(from, {
-        zone: context.appData.timeZone,
-      }).toMillis(),
-      to: DateTime.fromISO(to, { zone: context.appData.timeZone }).toMillis(),
+      from: newFrom.toMillis(),
+      to: newTo.toMillis(),
     });
+
+    // Fetch data with the new times
+    fetchData(agentId, newFrom.toJSDate(), newTo.toJSDate());
   }
 
   $: if (context && context.timeRange) {
@@ -274,6 +304,15 @@
         Alarm snapshot
       </h3>
       <div class="actions-top">
+        <div class="time-adjustment">
+          <button on:click={decrementTimeRange}>-</button>
+          <input type="number" bind:value={minuteAdjustment} min="1" />
+          <button on:click={incrementTimeRange}>+</button>
+          <select bind:value={adjustmentTarget}>
+            <option value="from">From Date</option>
+            <option value="to">To Date</option>
+          </select>
+        </div>
         <div
           class="search-input-container"
           style={isNarrow ? "width: 100px" : ""}
@@ -363,6 +402,39 @@
   @import "./styles/refresh";
   @import "./styles/ripple";
   @import "./styles/search-input";
+
+  .time-adjustment {
+    display: flex;
+    align-items: center;
+    margin-right: 10px;
+
+    button {
+      padding: 5px 10px;
+      margin: 0 5px;
+      background-color: var(--button-bg-color);
+      color: var(--button-text-color);
+      border: none;
+      cursor: pointer;
+
+      &:hover {
+        background-color: var(--button-hover-bg-color);
+      }
+    }
+
+    input[type="number"] {
+      width: 50px;
+      padding: 5px;
+      text-align: center;
+    }
+
+    select {
+      margin-left: 5px;
+      padding: 5px;
+      background: var(--basic);
+      border: 1px solid var(--card-border-color);
+      color: var(--text-color);
+    }
+  }
 
   .timerange-select {
     background: var(--basic);
