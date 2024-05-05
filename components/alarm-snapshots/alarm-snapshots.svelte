@@ -300,6 +300,16 @@
       clearInterval(autoRefreshInterval);
     }
   }
+
+  // Function to copy ID to clipboard with type annotation for the parameter
+  async function copyToClipboard(id: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(id);
+      console.log("Copied to clipboard");
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  }
 </script>
 
 <div class="card">
@@ -422,7 +432,7 @@
         <table class="base-table">
           <thead>
             <tr>
-              <th>ID</th>
+              <th class="id-column">ID</th>
               <th>Alarm</th>
               <th>Date</th>
               <th>Severity</th>
@@ -431,7 +441,25 @@
           <tbody>
             {#each filteredOccurrences as occurrence}
               <tr on:click={() => selectOccurrence(occurrence)}>
-                <td>{occurrence.publicId}</td>
+                <td class="id-column">
+                  <span>{occurrence.publicId}</span>
+                  <button
+                    on:click|stopPropagation={() =>
+                      copyToClipboard(occurrence.publicId)}
+                    class="copy-button"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      height="24px"
+                      viewBox="0 -960 960 960"
+                      width="16px"
+                      fill="#383838"
+                      ><path
+                        d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"
+                      /></svg
+                    >
+                  </button></td
+                >
                 <td>{occurrence.name}</td>
                 <td>{occurrence.occurredOn.formattedDate}</td>
                 <td>{occurrence.severity}</td>
@@ -451,6 +479,23 @@
   @import "./styles/refresh";
   @import "./styles/ripple";
   @import "./styles/search-input";
+  .id-column {
+    max-width: 45px;
+  }
+  .copy-button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #333; // Adjust color to fit your theme
+    margin-left: 8px;
+    vertical-align: middle;
+    font-size: 16px; // Adjust size as needed
+    float: right;
+    &:hover {
+      color: #555; // Adjust hover color as needed
+    }
+  }
+
   .time-adjustment {
     .input-switch {
       display: flex;
