@@ -305,13 +305,37 @@
       </h3>
       <div class="actions-top">
         <div class="time-adjustment">
-          <button on:click={decrementTimeRange}>-</button>
-          <input type="number" bind:value={minuteAdjustment} min="1" />
-          <button on:click={incrementTimeRange}>+</button>
           <select bind:value={adjustmentTarget}>
             <option value="from">From Date</option>
             <option value="to">To Date</option>
           </select>
+          <div class="button-group">
+            <button on:click={decrementTimeRange}
+              ><svg
+                xmlns="http://www.w3.org/2000/svg"
+                height="24px"
+                viewBox="0 -960 960 960"
+                width="24px"
+                fill="#e8eaed"
+                ><path
+                  d="M860-240 500-480l360-240v480Zm-400 0L100-480l360-240v480Zm-80-240Zm400 0Zm-400 90v-180l-136 90 136 90Zm400 0v-180l-136 90 136 90Z"
+                /></svg
+              ></button
+            >
+            <input type="number" bind:value={minuteAdjustment} min="1" />
+            <button on:click={incrementTimeRange}
+              ><svg
+                xmlns="http://www.w3.org/2000/svg"
+                height="24px"
+                viewBox="0 -960 960 960"
+                width="24px"
+                fill="#e8eaed"
+                ><path
+                  d="M100-240v-480l360 240-360 240Zm400 0v-480l360 240-360 240ZM180-480Zm400 0Zm-400 90 136-90-136-90v180Zm400 0 136-90-136-90v180Z"
+                /></svg
+              ></button
+            >
+          </div>
         </div>
         <div
           class="search-input-container"
@@ -402,37 +426,65 @@
   @import "./styles/refresh";
   @import "./styles/ripple";
   @import "./styles/search-input";
-
   .time-adjustment {
     display: flex;
     align-items: center;
-    margin-right: 10px;
+    .button-group {
+      margin-left: 5px;
+      margin-top: 16px;
+      display: flex;
+      background-color: var(
+        --input-background-color,
+        #fff
+      ); // Assuming default fallback
+      border: 0.5px solid var(--input-border-color, #ccc); // Match border with other inputs
+      border-radius: 4px;
+      overflow: hidden;
+      height: 36px;
 
-    button {
-      padding: 5px 10px;
-      margin: 0 5px;
-      background-color: var(--button-bg-color);
-      color: var(--button-text-color);
-      border: none;
-      cursor: pointer;
+      button {
+        width: 0px;
+        flex: 1;
+        padding: 0px;
+        font-size: 18px;
+        background-color: transparent;
+        border: none !important;
+        cursor: pointer;
+        color: var(--text-color, #333);
 
-      &:hover {
-        background-color: var(--button-hover-bg-color);
+        &:hover {
+          background-color: var(--button-hover-bg-color, #eee);
+        }
+
+        &:not(:last-child) {
+          border-right: 1px solid var(--input-border-color, #ccc);
+        }
+        svg {
+          margin-top: 3px;
+          fill: var(--button-icon-color, #666); // Default icon color
+          transition: fill 0.3s ease; // Smooth transition for color change
+
+          &:hover {
+            fill: var(--button-icon-hover-color, #333); // Change color on hover
+          }
+        }
       }
     }
 
     input[type="number"] {
-      width: 50px;
-      padding: 5px;
+      flex: 1; // Make input take available space to match size with search input
       text-align: center;
-    }
+      border: none !important; // Remove border inside the group
+      background-color: transparent; // Use transparent background inside the group
+      color: var(--text-color, #333);
+      width: 50%;
+      line-height: 38px; // Center text vertically
+      &:focus {
+        outline: none; // Remove focus outline inside the button group
+      }
 
-    select {
-      margin-left: 5px;
-      padding: 5px;
-      background: var(--basic);
-      border: 1px solid var(--card-border-color);
-      color: var(--text-color);
+      -webkit-appearance: none;
+      appearance: none;
     }
   }
 
