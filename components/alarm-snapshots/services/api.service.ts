@@ -42,7 +42,7 @@ export class ApiService {
   ): Promise<Alarm[]> {
     const startDate = DateTime.fromJSDate(from).toUTC(); // Renamed from fourWeeksAgo
     const endDate = DateTime.fromJSDate(to).toUTC(); // Renamed from currentDate
-
+    console.log("Startdate and Enddate API", startDate, endDate);
     const alarmsUrl = this.context.getApiUrl("AgentDataAlarmList", { agentId });
     const occurrencesUrl = this.context.getApiUrl(
       "AgentDataAlarmOccurrenceList",
@@ -50,10 +50,14 @@ export class ApiService {
     );
 
     const dateFilter = [
-      `gte(occurredOn,"${startDate.toISO()}")`, // Use startDate
-      `lte(occurredOn,"${endDate.toISO()}")`, // Use endDate
+      `gte(occurredOn,"${startDate
+        .set({ milliseconds: 0 })
+        .toISO({ suppressMilliseconds: true })}")`, // Use startDate
+      `lte(occurredOn,"${endDate
+        .set({ milliseconds: 0 })
+        .toISO({ suppressMilliseconds: true })}")`, // Use endDate
     ];
-
+    console.log("Date Filter", dateFilter);
     const [alarmsResponse, occurrencesResponse] = await Promise.all([
       this.recursiveFetch(alarmsUrl, ["name", "severity"]),
       this.recursiveFetch(
@@ -75,6 +79,7 @@ export class ApiService {
   async recursiveFetch(
     url: string,
     fields: string[] = [],
+    filters: string[] = [],
     items: any[] = [],
     pageAfter?: string
   ): Promise<any[]> {
@@ -85,12 +90,24 @@ export class ApiService {
     if (fields.length) {
       requestUrl.searchParams.set("fields", fields.join(","));
     }
+    if (filters.length) {
+      // for each filter set filters=filter1&filters=filter2
+      filters.forEach((filter) => {
+        requestUrl.searchParams.append("filters", filter);
+      });
+    }
 
     const response = await this.fetch(requestUrl.toString());
     const newData = items.concat(response.data);
 
     if (response.moreAfter) {
-      return this.recursiveFetch(url, fields, newData, response.moreAfter);
+      return this.recursiveFetch(
+        url,
+        fields,
+        filters,
+        newData,
+        response.moreAfter
+      );
     }
     return newData;
   }

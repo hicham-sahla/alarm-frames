@@ -7,6 +7,7 @@
     AgentDataAlarmOccurrence,
   } from "@ixon-cdk/types";
   import type { Alarm } from "./types";
+  import { writable } from "svelte/store";
 
   export let context: ComponentContext;
   let alarmsManager: AlarmsManager;
@@ -65,6 +66,7 @@
   let adjustmentTarget: "from" | "to" = "from"; // Default to adjusting 'from' date
 
   onMount(async () => {
+    console.log("Component initialized.");
     alarmsManager = new AlarmsManager(context);
     translations = context.translate(
       ["SEARCH", "NO_OCCURRENCES_FOUND", "OCCURRENCES", "ACTIVE_SINCE"],
@@ -86,6 +88,7 @@
 
     if (context) {
       context.ontimerangechange = (newTimeRange) => {
+        console.log("Time range changed:", newTimeRange);
         if (newTimeRange) {
           from = DateTime.fromMillis(newTimeRange.from, {
             zone: context.appData.timeZone,
@@ -122,10 +125,12 @@
       console.error("Agent ID is null or undefined.");
       return;
     }
+    console.log("Updaterange()", selectedTimeRange);
 
     const duration = timeRangeOptions[selectedTimeRange];
     const fromDt = DateTime.now().minus(duration).toUTC();
     const toDt = DateTime.now().toUTC();
+    console.log("Updaterange()", fromDt, toDt);
     fetchData(agentId, fromDt.toJSDate(), toDt.toJSDate());
   }
 
@@ -141,14 +146,23 @@
         from,
         to
       );
-      occurrencesList = alarms.flatMap((alarm) =>
-        alarm.occurrences.map((occ) => ({
-          name: alarm.name,
-          occurredOn: formatDate(occ.occurredOn), // Ensure this always returns an object
-          severity: alarm.severity,
-          publicId: occ.publicId || "Unknown ID",
-        }))
-      );
+      console.log("Fetched data:", alarms);
+      occurrencesList = alarms
+        .flatMap((alarm) =>
+          alarm.occurrences.map((occ) => ({
+            name: alarm.name,
+            occurredOn: formatDate(occ.occurredOn),
+            severity: alarm.severity,
+            publicId: occ.publicId || "Unknown ID",
+          }))
+        )
+        .sort((a, b) => {
+          // Parsing date and sorting in descending order
+          return (
+            DateTime.fromISO(b.occurredOn.fullDate).toMillis() -
+            DateTime.fromISO(a.occurredOn.fullDate).toMillis()
+          );
+        });
     } catch (error) {
       console.error("Error fetching data:", error);
     }
@@ -302,13 +316,22 @@
     }
   }
 
+  let copySuccess: Record<string, boolean> = {};
+  // To keep track of copy statuses for each ID
+
   // Function to copy ID to clipboard with type annotation for the parameter
   async function copyToClipboard(id: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(id);
-      console.log("Copied to clipboard");
+      copySuccess[id] = true; // Set success state true for this ID
+      console.log("Copied to clipboard:", id, copySuccess);
+      setTimeout(() => {
+        copySuccess[id] = false; // Reset after 2 seconds
+        console.log("Reset copy success:", id, copySuccess);
+      }, 2000);
     } catch (err) {
       console.error("Failed to copy:", err);
+      copySuccess[id] = false;
     }
   }
 </script>
@@ -445,20 +468,38 @@
                 <td class="id-column">
                   <span>{occurrence.publicId}</span>
                   <button
+                    class="copy-button {copySuccess[occurrence.publicId]
+                      ? 'success'
+                      : ''}"
                     on:click|stopPropagation={() =>
                       copyToClipboard(occurrence.publicId)}
-                    class="copy-button"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      height="24px"
-                      viewBox="0 -960 960 960"
-                      width="16px"
-                      fill="#383838"
-                      ><path
-                        d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"
-                      /></svg
-                    >
+                    {#if copySuccess[occurrence.publicId]}
+                      <!-- Display a check icon or change style on success -->
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        height="24px"
+                        viewBox="0 -960 960 960"
+                        width="24px"
+                        fill="#e8eaed"
+                        ><path
+                          d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"
+                        /></svg
+                      >
+                    {:else}
+                      <!-- Original copy icon -->
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        height="24px"
+                        viewBox="0 -960 960 960"
+                        width="16px"
+                        fill="currentColor"
+                      >
+                        <path
+                          d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"
+                        />
+                      </svg>
+                    {/if}
                   </button></td
                 >
                 <td>{occurrence.name}</td>
@@ -484,16 +525,33 @@
     max-width: 45px;
   }
   .copy-button {
+    transition: color 0.3s ease; // Smooth color transition
     background: none;
     border: none;
     cursor: pointer;
-    color: #333; // Adjust color to fit your theme
+    color: #333; // Default color
     margin-left: 8px;
     vertical-align: middle;
-    font-size: 16px; // Adjust size as needed
+    font-size: 16px;
     float: right;
+
     &:hover {
-      color: #555; // Adjust hover color as needed
+      color: #555; // Hover color
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.5;
+      }
+      100% {
+        opacity: 1;
+      }
+    }
+    &.success svg {
+      fill: #4caf50; // Green color indicating success
     }
   }
 
