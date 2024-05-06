@@ -168,7 +168,7 @@
     const dt = DateTime.fromISO(dateString);
     return {
       fullDate: dt.toISO(),
-      dateOnly: dt.toISODate(),
+      dateOnly: dt.toFormat("dd-MM-yyyy"),
       timeOnly: dt.toFormat("HH:mm"),
       formattedDate: dt.toFormat("dd-MM-yyyy HH:mm"), // Ensure formattedDate is always defined
     };
@@ -262,7 +262,7 @@
   }
 
   $: filteredOccurrences = occurrencesList.filter((occ) => {
-    const { fullDate, dateOnly, timeOnly } = occ.occurredOn; // Directly use the object
+    const { fullDate, dateOnly, timeOnly, formattedDate } = occ.occurredOn; // Directly use the object
     return [
       occ.name.toLowerCase(),
       occ.severity.toLowerCase(),
@@ -270,6 +270,7 @@
       fullDate.toLowerCase(),
       dateOnly.toLowerCase(),
       timeOnly.toLowerCase(),
+      formattedDate.toLowerCase(),
     ].some((field) => field.includes(search.toLowerCase()));
   });
 
