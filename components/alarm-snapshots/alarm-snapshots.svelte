@@ -87,17 +87,17 @@
     }
 
     if (context) {
-      context.ontimerangechange = (newTimeRange) => {
-        console.log("Time range changed:", newTimeRange);
-        if (newTimeRange) {
-          from = DateTime.fromMillis(newTimeRange.from, {
-            zone: context.appData.timeZone,
-          }).toISO();
-          to = DateTime.fromMillis(newTimeRange.to, {
-            zone: context.appData.timeZone,
-          }).toISO();
-        }
-      };
+      // context.ontimerangechange = (newTimeRange) => {
+      //   console.log("Time range changed:", newTimeRange);
+      //   if (newTimeRange) {
+      //     from = DateTime.fromMillis(newTimeRange.from, {
+      //       zone: context.appData.timeZone,
+      //     }).toISO();
+      //     to = DateTime.fromMillis(newTimeRange.to, {
+      //       zone: context.appData.timeZone,
+      //     }).toISO();
+      //   }
+      // };
 
       const fromDt = DateTime.now().minus({ weeks: 4 }).toUTC();
       const toDt = DateTime.now().toUTC();
@@ -261,9 +261,6 @@
       from: newFrom.toMillis(),
       to: newTo.toMillis(),
     });
-
-    // Fetch data with the new times
-    fetchData(agentId, newFrom.toJSDate(), newTo.toJSDate());
   }
 
   $: if (context && context.timeRange) {
@@ -292,7 +289,6 @@
     if (agentId) {
       const from = DateTime.now().minus({ weeks: 4 }).toJSDate();
       const to = DateTime.now().toJSDate();
-      fetchData(agentId, from, to);
     } else {
       console.error("Agent ID is unavailable.");
     }
