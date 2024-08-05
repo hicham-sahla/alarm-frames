@@ -294,24 +294,6 @@
     }
   }
 
-  function toggleAutoRefresh(): void {
-    doAutoRefresh = !doAutoRefresh;
-
-    if (doAutoRefresh) {
-      autoRefreshInterval = window.setInterval(() => {
-        if (agentId) {
-          const from = DateTime.now().minus({ weeks: 4 }).toJSDate();
-          const to = DateTime.now().toJSDate();
-          fetchData(agentId, from, to);
-        } else {
-          console.error("Agent ID is unavailable during auto-refresh.");
-        }
-      }, 30000);
-    } else {
-      clearInterval(autoRefreshInterval);
-    }
-  }
-
   let copySuccess: Record<string, boolean> = {};
   // To keep track of copy statuses for each ID
 
@@ -436,21 +418,6 @@
           />
         </div>
         <div class="refresh-container">
-          <button class="refresh ripple" on:click={toggleRefresh}>
-            <svg width="24" height="24" viewBox="0 -960 960 960">
-              <path
-                d="M204-318q-22-38-33-78t-11-82q0-134 93-228t227-94h7l-64-64 56-56 160 160-160 160-56-56 64-64h-7q-100 0-170 70.5T240-478q0 26 6 51t18 49l-60 60ZM481-40 321-200l160-160 56 56-64 64h7q100 0 170-70.5T720-482q0-26-6-51t-18-49l60-60q22 38 33 78t11 82q0 134-93 228t-227 94h-7l64 64-56 56Z"
-              />
-            </svg>
-          </button>
-          <button
-            class={doAutoRefresh
-              ? "auto-refresh ripple active"
-              : "auto-refresh ripple"}
-            on:click={toggleAutoRefresh}
-          >
-            30s
-          </button>
           <select
             class="timerange-select"
             bind:value={selectedTimeRange}
@@ -461,10 +428,29 @@
             <option value="6 months">Last 6 Months</option>
             <option value="1 year">Last 1 Year</option>
           </select>
+          <button class="refresh ripple" on:click={toggleRefresh}>
+            <svg width="24" height="24" viewBox="0 -960 960 960">
+              <path
+                d="M204-318q-22-38-33-78t-11-82q0-134 93-228t227-94h7l-64-64 56-56 160 160-160 160-56-56 64-64h-7q-100 0-170 70.5T240-478q0 26 6 51t18 49l-60 60ZM481-40 321-200l160-160 56 56-64 64h7q100 0 170-70.5T720-482q0-26-6-51t-18-49l60-60q22 38 33 78t11 82q0 134-93 228t-227 94h-7l64 64-56 56Z"
+              />
+            </svg>
+          </button>
+          <button
+            class="auto-refresh ripple"
+            on:click={resetSelectedOccurrence}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="24px"
+              viewBox="0 -960 960 960"
+              width="24px"
+              fill="#f44336"
+              ><path
+                d="M480-120q-138 0-240.5-91.5T122-440h82q14 104 92.5 172T480-200q117 0 198.5-81.5T760-480q0-117-81.5-198.5T480-760q-69 0-129 32t-101 88h110v80H120v-240h80v94q51-64 124.5-99T480-840q75 0 140.5 28.5t114 77q48.5 48.5 77 114T840-480q0 75-28.5 140.5t-77 114q-48.5 48.5-114 77T480-120Zm112-192L440-464v-216h80v184l128 128-56 56Z"
+              /></svg
+            >
+          </button>
         </div>
-        <button on:click={resetSelectedOccurrence} class="reset-button">
-          Reset Selection
-        </button>
       </div>
     </div>
     <div class="card-content">
@@ -544,19 +530,7 @@
   @import "./styles/refresh";
   @import "./styles/ripple";
   @import "./styles/search-input";
-  .reset-button {
-    background-color: #f44336; /* Example color */
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    cursor: pointer;
-    border-radius: 4px;
-    margin-left: 8px;
-  }
 
-  .reset-button:hover {
-    background-color: #d32f2f;
-  }
   .id-column {
     max-width: 45px;
   }
