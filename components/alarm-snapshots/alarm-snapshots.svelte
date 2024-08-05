@@ -66,7 +66,6 @@
   let adjustmentTarget: "from" | "to" = "from"; // Default to adjusting 'from' date
 
   onMount(async () => {
-    console.log("Component initialized.");
     alarmsManager = new AlarmsManager(context);
     translations = context.translate(
       ["SEARCH", "NO_OCCURRENCES_FOUND", "OCCURRENCES", "ACTIVE_SINCE"],
@@ -87,18 +86,6 @@
     }
 
     if (context) {
-      // context.ontimerangechange = (newTimeRange) => {
-      //   console.log("Time range changed:", newTimeRange);
-      //   if (newTimeRange) {
-      //     from = DateTime.fromMillis(newTimeRange.from, {
-      //       zone: context.appData.timeZone,
-      //     }).toISO();
-      //     to = DateTime.fromMillis(newTimeRange.to, {
-      //       zone: context.appData.timeZone,
-      //     }).toISO();
-      //   }
-      // };
-
       const fromDt = DateTime.now().minus({ weeks: 4 }).toUTC();
       const toDt = DateTime.now().toUTC();
       const client = context.createResourceDataClient();
@@ -125,12 +112,10 @@
       console.error("Agent ID is null or undefined.");
       return;
     }
-    console.log("Updaterange()", selectedTimeRange);
 
     const duration = timeRangeOptions[selectedTimeRange];
     const fromDt = DateTime.now().minus(duration).toUTC();
     const toDt = DateTime.now().toUTC();
-    console.log("Updaterange()", fromDt, toDt);
     fetchData(agentId, fromDt.toJSDate(), toDt.toJSDate());
   }
 
@@ -146,7 +131,7 @@
         from,
         to
       );
-      console.log("Fetched data:", alarms);
+
       occurrencesList = alarms
         .flatMap((alarm) =>
           alarm.occurrences.map((occ) => ({
@@ -190,7 +175,6 @@
 
   // Use the Occurrence type for the function parameter
   function selectOccurrence(occurrence: Occurrence) {
-    console.log("Selected occurrence:", occurrence);
     if (
       !occurrence ||
       !occurrence.occurredOn ||
@@ -203,7 +187,6 @@
     const startTime = DateTime.fromISO(occurrence.occurredOn.fullDate, {
       zone: context.appData.timeZone,
     });
-    console.log("Parsed Start Time:", startTime.toString());
 
     if (!startTime.isValid) {
       console.error(
@@ -217,7 +200,6 @@
     localStorage.setItem("snapshot-date", startTime.toISO());
 
     const endTime = startTime.plus({ hours: 1 });
-    console.log("Calculated End Time:", endTime.toString());
 
     if (startTime.isValid && endTime.isValid) {
       context.setTimeRange({
@@ -302,10 +284,9 @@
     try {
       await navigator.clipboard.writeText(id);
       copySuccess[id] = true; // Set success state true for this ID
-      console.log("Copied to clipboard:", id, copySuccess);
+
       setTimeout(() => {
         copySuccess[id] = false; // Reset after 2 seconds
-        console.log("Reset copy success:", id, copySuccess);
       }, 2000);
     } catch (err) {
       console.error("Failed to copy:", err);
@@ -531,9 +512,6 @@
   @import "./styles/ripple";
   @import "./styles/search-input";
 
-  .id-column {
-    max-width: 45px;
-  }
   .copy-button {
     transition: color 0.3s ease; // Smooth color transition
     background: none;
