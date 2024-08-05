@@ -330,6 +330,30 @@
       copySuccess[id] = false;
     }
   }
+
+  function resetSelectedOccurrence() {
+    // Clear the selected date from local storage
+    localStorage.removeItem("snapshot-date");
+
+    // Get the current date and time in the specified time zone
+    const now = DateTime.now().setZone(context.appData.timeZone);
+
+    // Define the start of the day (midnight) for the 'from' value and end of the day for 'to' value
+    const startOfDay = now.startOf("day").toMillis(); // Midnight at the start of the day
+    const endOfDay = now.endOf("day").toMillis(); // Just before midnight at the end of the day
+
+    // Reset the date range to the current day from start to end
+    if (context && context.setTimeRange) {
+      context.setTimeRange({
+        from: startOfDay,
+        to: endOfDay,
+      });
+    }
+
+    // Optionally, reset other state variables if applicable
+    from = "";
+    to = "";
+  }
 </script>
 
 <div class="card">
@@ -438,6 +462,9 @@
             <option value="1 year">Last 1 Year</option>
           </select>
         </div>
+        <button on:click={resetSelectedOccurrence} class="reset-button">
+          Reset Selection
+        </button>
       </div>
     </div>
     <div class="card-content">
@@ -517,6 +544,19 @@
   @import "./styles/refresh";
   @import "./styles/ripple";
   @import "./styles/search-input";
+  .reset-button {
+    background-color: #f44336; /* Example color */
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: 4px;
+    margin-left: 8px;
+  }
+
+  .reset-button:hover {
+    background-color: #d32f2f;
+  }
   .id-column {
     max-width: 45px;
   }
