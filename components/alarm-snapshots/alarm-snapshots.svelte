@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, afterUpdate } from "svelte";
   import { DateTime } from "luxon";
   import { AlarmsManager } from "./services/alarms-manager";
   import type {
@@ -109,7 +109,6 @@
 
   function updateDateRange() {
     if (!agentId) {
-      console.error("Agent ID is null or undefined.");
       return;
     }
 
@@ -317,6 +316,56 @@
     from = "";
     to = "";
   }
+
+  // Tooltip elements
+  let refreshButtonEl: HTMLButtonElement;
+  let resetButtonEl: HTMLButtonElement;
+  let incrementTimeRangeButtonEl: HTMLButtonElement;
+  let decrementTimeRangeButtonEl: HTMLButtonElement;
+  let fromDateInputSwitchEl: HTMLLabelElement;
+  let timerangeSelectEl: HTMLSelectElement;
+
+  afterUpdate(() => {
+    if (refreshButtonEl) {
+      context.createTooltip(refreshButtonEl, {
+        message: "Refresh the occurence list",
+      });
+    }
+    if (resetButtonEl) {
+      context.createTooltip(resetButtonEl, {
+        message: "Reset the selected occurrence",
+      });
+    }
+    if (incrementTimeRangeButtonEl) {
+      context.createTooltip(incrementTimeRangeButtonEl, {
+        message: "Extend the time range",
+      });
+    }
+    if (decrementTimeRangeButtonEl) {
+      context.createTooltip(decrementTimeRangeButtonEl, {
+        message: "Shorten the time range",
+      });
+    }
+    if (fromDateInputSwitchEl) {
+      context.createTooltip(
+        fromDateInputSwitchEl.parentElement as HTMLElement,
+        {
+          message: "Toggle to adjust start or end date",
+        }
+      );
+    }
+    if (timerangeSelectEl) {
+      context.createTooltip(timerangeSelectEl, {
+        message: "Choose a time range to retrieve the occurences",
+      });
+    }
+    // Add tooltips for copy buttons
+    document.querySelectorAll(".copy-button").forEach((button) => {
+      context.createTooltip(button as HTMLElement, {
+        message: "Copy ID to clipboard",
+      });
+    });
+  });
 </script>
 
 <div class="card">
@@ -340,7 +389,7 @@
       <div class="actions-top">
         <div class="time-adjustment">
           <div class="input-switch">
-            <label class="switch-label">From Date</label>
+            <label class="switch-label">Start Date</label>
             <input
               type="checkbox"
               id="switchy"
@@ -348,11 +397,17 @@
               bind:checked={isToDate}
               on:change={toggleDateAdjustment}
             />
-            <label for="switchy" class="switch"></label>
-            <label class="switch-label">To Date</label>
+            <label
+              bind:this={fromDateInputSwitchEl}
+              for="switchy"
+              class="switch"
+            ></label>
+            <label class="switch-label">End Date</label>
           </div>
           <div class="button-group">
-            <button on:click={decrementTimeRange}
+            <button
+              on:click={decrementTimeRange}
+              bind:this={decrementTimeRangeButtonEl}
               ><svg
                 xmlns="http://www.w3.org/2000/svg"
                 height="24px"
@@ -360,12 +415,14 @@
                 width="24px"
                 fill="#e8eaed"
                 ><path
-                  d="M860-240 500-480l360-240v480Zm-400 0L100-480l360-240v480Zm-80-240Zm400 0Zm-400 90v-180l-136 90 136 90Zm400 0v-180l-136 90 136 90Z"
+                  d="M480-120q-138 0-240.5-91.5T122-440h82q14 104 92.5 172T480-200q117 0 198.5-81.5T760-480q0-117-81.5-198.5T480-760q-69 0-129 32t-101 88h110v80H120v-240h80v94q51-64 124.5-99T480-840q75 0 140.5 28.5t114 77q48.5 48.5 77 114T840-480q0 75-28.5 140.5t-77 114q-48.5 48.5-114 77T480-120Zm112-192L440-464v-216h80v184l128 128-56 56Z"
                 /></svg
               ></button
             >
             <input type="number" bind:value={minuteAdjustment} min="1" />
-            <button on:click={incrementTimeRange}
+            <button
+              on:click={incrementTimeRange}
+              bind:this={incrementTimeRangeButtonEl}
               ><svg
                 xmlns="http://www.w3.org/2000/svg"
                 height="24px"
@@ -373,7 +430,7 @@
                 width="24px"
                 fill="#e8eaed"
                 ><path
-                  d="M100-240v-480l360 240-360 240Zm400 0v-480l360 240-360 240ZM180-480Zm400 0Zm-400 90 136-90-136-90v180Zm400 0 136-90-136-90v180Z"
+                  d="M480-120q-75 0-140.5-28.5t-114-77q-48.5-48.5-77-114T120-480q0-75 28.5-140.5t77-114q48.5-48.5 114-77T480-840q82 0 155.5 35T760-706v-94h80v240H600v-80h110q-41-56-101-88t-129-32q-117 0-198.5 81.5T200-480q0 117 81.5 198.5T480-200q105 0 183.5-68T756-440h82q-15 137-117.5 228.5T480-120Zm112-192L440-464v-216h80v184l128 128-56 56Z"
                 /></svg
               ></button
             >
@@ -403,13 +460,18 @@
             class="timerange-select"
             bind:value={selectedTimeRange}
             on:change={updateDateRange}
+            bind:this={timerangeSelectEl}
           >
             <option value="4 weeks">Last 4 Weeks</option>
             <option value="3 months">Last 3 Months</option>
             <option value="6 months">Last 6 Months</option>
             <option value="1 year">Last 1 Year</option>
           </select>
-          <button class="refresh ripple" on:click={toggleRefresh}>
+          <button
+            class="refresh ripple"
+            on:click={toggleRefresh}
+            bind:this={refreshButtonEl}
+          >
             <svg width="24" height="24" viewBox="0 -960 960 960">
               <path
                 d="M204-318q-22-38-33-78t-11-82q0-134 93-228t227-94h7l-64-64 56-56 160 160-160 160-56-56 64-64h-7q-100 0-170 70.5T240-478q0 26 6 51t18 49l-60 60ZM481-40 321-200l160-160 56 56-64 64h7q100 0 170-70.5T720-482q0-26-6-51t-18-49l60-60q22 38 33 78t11 82q0 134-93 228t-227 94h-7l64 64-56 56Z"
@@ -419,6 +481,7 @@
           <button
             class="auto-refresh ripple"
             on:click={resetSelectedOccurrence}
+            bind:this={resetButtonEl}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -427,7 +490,7 @@
               width="24px"
               fill="#f44336"
               ><path
-                d="M480-120q-138 0-240.5-91.5T122-440h82q14 104 92.5 172T480-200q117 0 198.5-81.5T760-480q0-117-81.5-198.5T480-760q-69 0-129 32t-101 88h110v80H120v-240h80v94q51-64 124.5-99T480-840q75 0 140.5 28.5t114 77q48.5 48.5 77 114T840-480q0 75-28.5 140.5t-77 114q-48.5 48.5-114 77T480-120Zm112-192L440-464v-216h80v184l128 128-56 56Z"
+                d="m656-120-56-56 84-84-84-84 56-56 84 84 84-84 56 56-83 84 83 84-56 56-84-83-84 83Zm-176 0q-138 0-240.5-91.5T122-440h82q14 104 92.5 172T480-200q11 0 20.5-.5T520-203v81q-10 1-19.5 1.5t-20.5.5ZM120-560v-240h80v94q51-64 124.5-99T480-840q150 0 255 105t105 255h-80q0-117-81.5-198.5T480-760q-69 0-129 32t-101 88h110v80H120Zm414 190-94-94v-216h80v184l56 56-42 70Z"
               /></svg
             >
           </button>
