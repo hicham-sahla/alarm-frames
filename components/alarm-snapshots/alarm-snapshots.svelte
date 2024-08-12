@@ -261,7 +261,11 @@
   }
 
   $: filteredOccurrences = occurrencesList.filter((occ) => {
-    const { fullDate, dateOnly, timeOnly, formattedDate } = occ.occurredOn; // Directly use the object
+    const { fullDate, dateOnly, timeOnly, formattedDate } = occ.occurredOn;
+
+    // New formatted date for table
+    const formattedDateForSearch = formatDateForTable(fullDate);
+
     return [
       occ.name.toLowerCase(),
       occ.severity.toLowerCase(),
@@ -270,6 +274,7 @@
       dateOnly.toLowerCase(),
       timeOnly.toLowerCase(),
       formattedDate.toLowerCase(),
+      formattedDateForSearch.toLowerCase(), // Include the formatted date for search
     ].some((field) => field.includes(search.toLowerCase()));
   });
 
@@ -373,6 +378,14 @@
       });
     });
   });
+
+  function formatDateForTable(dateString: string | undefined): string {
+    if (!dateString) {
+      return "No Date Provided"; // Fallback in case the date is undefined
+    }
+    const dt = DateTime.fromISO(dateString);
+    return dt.toFormat("M/d/yyyy, h:mm a"); // Format matching the date picker
+  }
 </script>
 
 <div class="card">
@@ -563,7 +576,7 @@
                   </button></td
                 >
                 <td>{occurrence.name}</td>
-                <td>{occurrence.occurredOn.formattedDate}</td>
+                <td>{formatDateForTable(occurrence.occurredOn.fullDate)}</td>
                 <td>{occurrence.severity}</td>
               </tr>
             {/each}
