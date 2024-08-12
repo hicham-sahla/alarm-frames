@@ -195,19 +195,20 @@
       return;
     }
 
-    // Save to local storage
-    localStorage.setItem("snapshot-date", startTime.toISO());
-
+    // Set 'from' and 'to' based on the selected occurrence
     const endTime = startTime.plus({ hours: 1 });
 
-    if (startTime.isValid && endTime.isValid) {
-      context.setTimeRange({
-        from: startTime.toMillis(),
-        to: endTime.toMillis(),
-      });
-    } else {
-      console.error("Invalid dates provided for time range.");
-    }
+    context.setTimeRange({
+      from: startTime.toMillis(),
+      to: endTime.toMillis(),
+    });
+
+    // Update local 'from' and 'to' variables
+    from = startTime.toISO();
+    to = endTime.toISO();
+
+    // Store the selected date locally to avoid resetting
+    localStorage.setItem("snapshot-date", startTime.toISO());
   }
 
   function incrementTimeRange() {
@@ -224,33 +225,39 @@
       return;
     }
 
-    let newFrom = DateTime.fromISO(from, { zone: context.appData.timeZone });
-    let newTo = DateTime.fromISO(to, { zone: context.appData.timeZone });
+    // Ensure 'from' and 'to' are taken from the currently selected time range
+    let newFrom = DateTime.fromMillis(context.timeRange.from, {
+      zone: context.appData.timeZone,
+    });
+    let newTo = DateTime.fromMillis(context.timeRange.to, {
+      zone: context.appData.timeZone,
+    });
 
+    // Perform the adjustment based on whether we're adjusting the 'from' or 'to' date
     if (adjustmentTarget === "from") {
       newFrom = newFrom.plus({ minutes: minutes });
     } else {
       newTo = newTo.plus({ minutes: minutes });
     }
 
-    // Update the global 'from' and 'to' ISO strings to full datetime
-    from = newFrom.toISO();
-    to = newTo.toISO();
-
-    // Set the new time range in context
+    // Update the 'from' and 'to' values in the context's time range
     context.setTimeRange({
       from: newFrom.toMillis(),
       to: newTo.toMillis(),
     });
+
+    // Update the local 'from' and 'to' variables to reflect the new time range
+    from = newFrom.toISO();
+    to = newTo.toISO();
   }
 
   $: if (context && context.timeRange) {
     from = DateTime.fromMillis(context.timeRange.from, {
       zone: context.appData.timeZone,
-    }).toISODate();
+    }).toISO(); // Use toISO() to retain the complete datetime information
     to = DateTime.fromMillis(context.timeRange.to, {
       zone: context.appData.timeZone,
-    }).toISODate();
+    }).toISO();
   }
 
   $: filteredOccurrences = occurrencesList.filter((occ) => {
