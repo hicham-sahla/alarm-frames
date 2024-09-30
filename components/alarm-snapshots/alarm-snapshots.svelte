@@ -73,35 +73,24 @@
       { source: "global" }
     );
 
-    // Retrieve from local storage
-    const savedDate = localStorage.getItem("snapshot-date");
-    if (savedDate) {
-      const startDate = DateTime.fromISO(savedDate, {
-        zone: context.appData.timeZone,
-      });
-      context.setTimeRange({
-        from: startDate.toMillis(),
-        to: startDate.plus({ hours: 1 }).toMillis(),
-      });
-    }
-
     if (context) {
-      const fromDt = DateTime.now().minus({ weeks: 4 }).toUTC();
-      const toDt = DateTime.now().toUTC();
       const client = context.createResourceDataClient();
-      client.query([{ selector: "Agent", fields: ["publicId"] }], (results) => {
-        if (
-          results &&
-          results.length > 0 &&
-          results[0].data &&
-          results[0].data.publicId
-        ) {
-          agentId = results[0].data.publicId;
-          if (agentId) {
-            fetchData(agentId, fromDt.toJSDate(), toDt.toJSDate());
+      client.query(
+        [{ selector: "Agent", fields: ["publicId"] }],
+        async (results) => {
+          if (
+            results &&
+            results.length > 0 &&
+            results[0].data &&
+            results[0].data.publicId
+          ) {
+            agentId = results[0].data.publicId;
+            if (agentId) {
+              await selectFirstNonEmptyRange();
+            }
           }
         }
-      });
+      );
     } else {
       console.error("Context is not initialized.");
     }
@@ -122,7 +111,11 @@
     tableScrollTop = (event.target as HTMLDivElement).scrollTop;
   }
 
-  async function fetchData(agentId: string, from: Date, to: Date) {
+  async function fetchData(
+    agentId: string,
+    from: Date,
+    to: Date
+  ): Promise<boolean> {
     loading = true;
     try {
       let alarms = await alarmsManager.getAllAlarmOccurrencesForAgent(
@@ -141,18 +134,40 @@
           }))
         )
         .sort((a, b) => {
-          // Parsing date and sorting in descending order
           return (
             DateTime.fromISO(b.occurredOn.fullDate).toMillis() -
             DateTime.fromISO(a.occurredOn.fullDate).toMillis()
           );
         });
+
+      return occurrencesList.length > 0;
     } catch (error) {
       console.error("Error fetching data:", error);
+      return false;
+    } finally {
+      loading = false;
     }
-    loading = false;
   }
 
+  async function selectFirstNonEmptyRange() {
+    if (!agentId) return;
+
+    for (const timeRange of Object.keys(timeRangeOptions) as TimeRanges[]) {
+      const duration = timeRangeOptions[timeRange];
+      const fromDt = DateTime.now().minus(duration).toUTC();
+      const toDt = DateTime.now().toUTC();
+
+      const hasData = await fetchData(
+        agentId,
+        fromDt.toJSDate(),
+        toDt.toJSDate()
+      );
+      if (hasData) {
+        selectedTimeRange = timeRange;
+        break;
+      }
+    }
+  }
   function formatDate(dateString: string | undefined) {
     if (!dateString) {
       // Return a default object where no fields are undefined
@@ -518,71 +533,65 @@
       </div>
     </div>
     <div class="card-content">
-      {#if tableScrollTop > 0}
-        <div class="table-header-drop-shadow" style="width: {tableWidth}px" />
+      {#if loading}
+        <div class="loading-state">
+          <div class="spinner">
+            <svg
+              preserveAspectRatio="xMidYMid meet"
+              focusable="false"
+              viewBox="0 0 100 100"
+            >
+              <circle cx="50%" cy="50%" r="45" />
+            </svg>
+          </div>
+        </div>
+      {:else if filteredOccurrences.length === 0}
+        <div class="no-occurrences-message">
+          <p>
+            There are no occurrences available for the selected time period.
+          </p>
+          <p>Please try adjusting the time range above to view more data.</p>
+        </div>
+      {:else}
+        <div
+          class="table-wrapper"
+          bind:clientWidth={tableWidth}
+          on:scroll={handleTableScroll}
+        >
+          {#if filteredOccurrences.length === 0}
+            <div class="no-occurrences-message">
+              <p>
+                There are no occurrences available for the selected time period.
+              </p>
+              <p>
+                Please try adjusting the time range above to view more data.
+              </p>
+            </div>
+          {:else}
+            <table class="base-table">
+              <thead>
+                <tr>
+                  <th class="id-column key-column">ID</th>
+                  <th class="key-column">Alarm</th>
+                  <th class="key-column">Date</th>
+                  <th class="key-column">Severity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each filteredOccurrences as occurrence}
+                  <tr on:click={() => selectOccurrence(occurrence)}>
+                    <td class="id-column">{occurrence.publicId}</td>
+                    <td>{occurrence.name}</td>
+                    <td>{formatDateForTable(occurrence.occurredOn.fullDate)}</td
+                    >
+                    <td>{occurrence.severity}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
+        </div>
       {/if}
-      <div
-        class="table-wrapper"
-        bind:clientWidth={tableWidth}
-        on:scroll={handleTableScroll}
-      >
-        <table class="base-table">
-          <thead>
-            <tr>
-              <th class="id-column">ID</th>
-              <th>Alarm</th>
-              <th>Date</th>
-              <th>Severity</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each filteredOccurrences as occurrence}
-              <tr on:click={() => selectOccurrence(occurrence)}>
-                <td class="id-column">
-                  <span>{occurrence.publicId}</span>
-                  <button
-                    class="copy-button {copySuccess[occurrence.publicId]
-                      ? 'success'
-                      : ''}"
-                    on:click|stopPropagation={() =>
-                      copyToClipboard(occurrence.publicId)}
-                  >
-                    {#if copySuccess[occurrence.publicId]}
-                      <!-- Display a check icon or change style on success -->
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        height="24px"
-                        viewBox="0 -960 960 960"
-                        width="24px"
-                        fill="#e8eaed"
-                        ><path
-                          d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"
-                        /></svg
-                      >
-                    {:else}
-                      <!-- Original copy icon -->
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        height="24px"
-                        viewBox="0 -960 960 960"
-                        width="16px"
-                        fill="currentColor"
-                      >
-                        <path
-                          d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"
-                        />
-                      </svg>
-                    {/if}
-                  </button></td
-                >
-                <td>{occurrence.name}</td>
-                <td>{formatDateForTable(occurrence.occurredOn.fullDate)}</td>
-                <td>{occurrence.severity}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
     </div>
   {/if}
 </div>
@@ -761,7 +770,7 @@
     border-collapse: collapse; /* Ensures borders between cells are merged */
   }
   .card-header {
-    margin-bottom: 8px;
+    margin-bottom: 40px;
     .actions-top {
       display: flex;
       flex-direction: row;
@@ -781,7 +790,7 @@
     position: absolute;
     left: 0;
     right: 0;
-    top: 0;
+    top: -9px;
     bottom: 0;
     padding: 8px;
     overflow: auto;
@@ -811,7 +820,7 @@
           position: sticky;
           white-space: nowrap;
           background: var(--basic);
-          top: 0;
+          top: -10px;
           overflow: hidden;
           text-overflow: ellipsis;
           max-width: 7em;
@@ -827,5 +836,19 @@
   .no-search-results {
     font-size: 14px;
     margin-bottom: 16px;
+  }
+  .no-occurrences-message {
+    text-align: center;
+    font-size: 16px;
+    color: #555; // Subtle color to match the UI theme
+    padding: 40px 0; // Extra padding to give the message room to breathe
+    background-color: #f9f9f9; // Slight background color change for emphasis
+
+    p {
+      margin: 8px 0;
+    }
+  }
+  .key-column {
+    height: 20px;
   }
 </style>
