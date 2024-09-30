@@ -1,6 +1,6 @@
 {
   "main": "pct-alarm-snapshots.min.js",
-  "version": "2",
+  "version": "5",
   "sheetSettings": {
     "defaultCols": 6,
     "defaultRows": 6,
