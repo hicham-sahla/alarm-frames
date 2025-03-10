@@ -8,9 +8,41 @@
   } from "@ixon-cdk/types";
   import type { Alarm } from "./types";
   import { writable } from "svelte/store";
+  import { ProblematicAgentHandler } from "./services/problematic-agent-handler";
 
   export let context: ComponentContext;
   let alarmsManager: AlarmsManager;
+
+  // Create date formatters only once
+  const formatters = {
+    fullDate: new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }),
+    dateOnly: new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }),
+    timeOnly: new Intl.DateTimeFormat("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }),
+    tableFormat: new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      hour12: true,
+    }),
+  };
 
   type Occurrence = {
     name: string;
@@ -18,23 +50,30 @@
       fullDate: string;
       dateOnly: string;
       timeOnly: string;
-      formattedDate: string; // User-friendly formatted date
+      formattedDate: string;
     };
     severity: string;
     publicId: string;
   };
 
+  // Use proper state management to prevent unnecessary re-renders
   let occurrencesList: Occurrence[] = [];
+  let filteredOccurrences: Occurrence[] = [];
   let loading = true;
   let tableWidth = 0;
   let tableScrollTop = 0;
   let doAutoRefresh = false;
   let autoRefreshInterval: number | undefined;
+  let autoRefreshRate: number = 60; // Refresh rate in seconds
   $: isNarrow = tableWidth < 320;
 
   let agentId: string | null = null;
   let search = "";
   let translations: Record<string, string>;
+  let error: string | null = null;
+  let lastRefreshTime: string = "";
+  let warningMessage: string | null = null;
+  let loadProgress = 0;
 
   let from = "";
   let to = "";
@@ -44,15 +83,24 @@
     ThreeMonths = "3 months",
     SixMonths = "6 months",
     OneYear = "1 year",
+    ThreeDays = "3 days",
+    OneWeek = "1 week",
   }
 
-  const timeRangeOptions: {
-    [K in TimeRanges]: { weeks?: number; months?: number; years?: number };
+  let timeRangeOptions: {
+    [K in TimeRanges]: {
+      weeks?: number;
+      months?: number;
+      years?: number;
+      days?: number;
+    };
   } = {
     [TimeRanges.FourWeeks]: { weeks: 4 },
     [TimeRanges.ThreeMonths]: { months: 3 },
     [TimeRanges.SixMonths]: { months: 6 },
     [TimeRanges.OneYear]: { years: 1 },
+    [TimeRanges.ThreeDays]: { days: 3 },
+    [TimeRanges.OneWeek]: { weeks: 1 },
   };
 
   let selectedTimeRange: TimeRanges = TimeRanges.FourWeeks;
@@ -62,49 +110,136 @@
   function toggleDateAdjustment() {
     adjustmentTarget = isToDate ? "to" : "from";
   }
+
   let minuteAdjustment: number = 15; // Default adjustment period in minutes
   let adjustmentTarget: "from" | "to" = "from"; // Default to adjusting 'from' date
 
   onMount(async () => {
-    alarmsManager = new AlarmsManager(context);
-    translations = context.translate(
-      ["SEARCH", "NO_OCCURRENCES_FOUND", "OCCURRENCES", "ACTIVE_SINCE"],
-      undefined,
-      { source: "global" }
-    );
+    try {
+      alarmsManager = new AlarmsManager(context);
+      translations = context.translate(
+        ["SEARCH", "NO_OCCURRENCES_FOUND", "OCCURRENCES", "ACTIVE_SINCE"],
+        undefined,
+        { source: "global" }
+      );
 
-    if (context) {
-      const client = context.createResourceDataClient();
-      client.query(
-        [{ selector: "Agent", fields: ["publicId"] }],
-        async (results) => {
-          if (
-            results &&
-            results.length > 0 &&
-            results[0].data &&
-            results[0].data.publicId
-          ) {
-            agentId = results[0].data.publicId;
-            if (agentId) {
-              await selectFirstNonEmptyRange();
+      if (context) {
+        const client = context.createResourceDataClient();
+        client.query(
+          [{ selector: "Agent", fields: ["publicId"] }],
+          async (results) => {
+            if (
+              results &&
+              results.length > 0 &&
+              results[0].data &&
+              results[0].data.publicId
+            ) {
+              agentId = results[0].data.publicId;
+              if (agentId) {
+                // Check if this is a problematic agent
+                if (ProblematicAgentHandler.isProblematicAgent(agentId)) {
+                  warningMessage =
+                    ProblematicAgentHandler.getWarningMessage(agentId);
+
+                  // For problematic agents, use a safe, short time range
+                  const now = new Date();
+                  const safeRange = ProblematicAgentHandler.getSafeDateRange(
+                    agentId,
+                    now
+                  );
+
+                  // Set the recommended time range
+                  const recommendedDays =
+                    ProblematicAgentHandler.getRecommendedTimeRange(agentId);
+                  if (recommendedDays <= 7) {
+                    selectedTimeRange = TimeRanges.ThreeDays;
+                  } else {
+                    selectedTimeRange = TimeRanges.FourWeeks;
+                  }
+
+                  // Fetch data with safe range
+                  await fetchData(agentId, safeRange.from, safeRange.to);
+                } else {
+                  // Normal agent handling
+                  await selectFirstNonEmptyRange();
+                }
+                startAutoRefresh();
+              }
             }
           }
-        }
-      );
-    } else {
-      console.error("Context is not initialized.");
+        );
+      } else {
+        console.error("Context is not initialized.");
+        error = "Context initialization failed.";
+      }
+    } catch (e) {
+      console.error("Error during component initialization:", e);
+      error = "Error initializing component. Please try refreshing the page.";
     }
   });
 
-  function updateDateRange() {
+  function startAutoRefresh() {
+    if (autoRefreshInterval) {
+      clearInterval(autoRefreshInterval);
+    }
+
+    if (doAutoRefresh) {
+      autoRefreshInterval = setInterval(() => {
+        if (agentId) {
+          updateDateRange(true);
+        }
+      }, autoRefreshRate * 1000);
+    }
+  }
+
+  function toggleAutoRefresh() {
+    doAutoRefresh = !doAutoRefresh;
+    startAutoRefresh();
+  }
+
+  function updateDateRange(forceRefresh = false) {
     if (!agentId) {
       return;
     }
 
-    const duration = timeRangeOptions[selectedTimeRange];
+    // Check if this is a custom time range for problematic agents
+    const selectedTimeRangeStr = String(selectedTimeRange);
+    if (selectedTimeRangeStr.includes("days")) {
+      const days = parseInt(selectedTimeRangeStr.split(" ")[0]);
+      if (!isNaN(days)) {
+        const toDt = DateTime.now().toUTC();
+        const fromDt = toDt.minus({ days });
+        fetchData(agentId, fromDt.toJSDate(), toDt.toJSDate(), forceRefresh);
+        return;
+      }
+    }
+
+    // Standard time ranges
+    const duration = timeRangeOptions[selectedTimeRange as TimeRanges];
     const fromDt = DateTime.now().minus(duration).toUTC();
     const toDt = DateTime.now().toUTC();
-    fetchData(agentId, fromDt.toJSDate(), toDt.toJSDate());
+
+    // Check if the selected range is excessive for this agent
+    if (
+      ProblematicAgentHandler.isTimeRangeExcessive(
+        agentId,
+        fromDt.toJSDate(),
+        toDt.toJSDate()
+      )
+    ) {
+      // Show warning and adjust to safe range
+      warningMessage =
+        "The selected time range may be too large for this agent. Using a safer time range.";
+      const safeRange = ProblematicAgentHandler.getSafeDateRange(
+        agentId,
+        toDt.toJSDate()
+      );
+      fetchData(agentId, safeRange.from, safeRange.to, forceRefresh);
+    } else {
+      // Use selected range
+      warningMessage = null;
+      fetchData(agentId, fromDt.toJSDate(), toDt.toJSDate(), forceRefresh);
+    }
   }
 
   function handleTableScroll(event: Event): void {
@@ -114,35 +249,72 @@
   async function fetchData(
     agentId: string,
     from: Date,
-    to: Date
+    to: Date,
+    forceRefresh = false
   ): Promise<boolean> {
     loading = true;
+    error = null;
+    loadProgress = 0;
+
     try {
+      // Show visual progress indicator
+      const progressInterval = setInterval(() => {
+        // Simulate progress up to 90% while waiting
+        if (loadProgress < 90) {
+          loadProgress += 5;
+        }
+      }, 200);
+
       let alarms = await alarmsManager.getAllAlarmOccurrencesForAgent(
         agentId,
         from,
-        to
+        to,
+        forceRefresh
       );
 
-      occurrencesList = alarms
-        .flatMap((alarm) =>
-          alarm.occurrences.map((occ) => ({
+      clearInterval(progressInterval);
+      loadProgress = 100;
+
+      // Process data in chunks to avoid UI lockup
+      const processedOccurrences = [];
+      const chunkSize = 100;
+
+      // Build occurrence list in chunks
+      for (const alarm of alarms) {
+        for (let i = 0; i < alarm.occurrences.length; i += chunkSize) {
+          const chunk = alarm.occurrences.slice(i, i + chunkSize);
+
+          const processed = chunk.map((occ) => ({
             name: alarm.name,
             occurredOn: formatDate(occ.occurredOn),
             severity: alarm.severity,
             publicId: occ.publicId || "Unknown ID",
-          }))
-        )
-        .sort((a, b) => {
-          return (
-            DateTime.fromISO(b.occurredOn.fullDate).toMillis() -
-            DateTime.fromISO(a.occurredOn.fullDate).toMillis()
-          );
-        });
+          }));
+
+          processedOccurrences.push(...processed);
+
+          // Allow UI to update between chunks
+          if (i + chunkSize < alarm.occurrences.length) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+        }
+      }
+
+      // Sort all occurrences by date in descending order
+      occurrencesList = processedOccurrences.sort((a, b) => {
+        return (
+          DateTime.fromISO(b.occurredOn.fullDate).toMillis() -
+          DateTime.fromISO(a.occurredOn.fullDate).toMillis()
+        );
+      });
+
+      // Update last refresh time
+      lastRefreshTime = new Date().toLocaleTimeString();
 
       return occurrencesList.length > 0;
     } catch (error) {
       console.error("Error fetching data:", error);
+      this.error = "Failed to fetch alarm data. Please try again.";
       return false;
     } finally {
       loading = false;
@@ -153,6 +325,7 @@
     if (!agentId) return;
 
     for (const timeRange of Object.keys(timeRangeOptions) as TimeRanges[]) {
+      loading = true;
       const duration = timeRangeOptions[timeRange];
       const fromDt = DateTime.now().minus(duration).toUTC();
       const toDt = DateTime.now().toUTC();
@@ -168,26 +341,38 @@
       }
     }
   }
+
+  // Memoize date formatting to improve performance
+  const dateCache = new Map<string, any>();
+
   function formatDate(dateString: string | undefined) {
     if (!dateString) {
-      // Return a default object where no fields are undefined
       return {
         fullDate: "No Date Provided",
         dateOnly: "No Date Provided",
         timeOnly: "No Time Provided",
-        formattedDate: "No Date Provided", // Make sure this is not undefined
+        formattedDate: "No Date Provided",
       };
     }
+
+    // Check cache first
+    if (dateCache.has(dateString)) {
+      return dateCache.get(dateString);
+    }
+
     const dt = DateTime.fromISO(dateString);
-    return {
+    const result = {
       fullDate: dt.toISO(),
       dateOnly: dt.toFormat("dd-MM-yyyy"),
       timeOnly: dt.toFormat("HH:mm"),
-      formattedDate: dt.toFormat("dd-MM-yyyy HH:mm"), // Ensure formattedDate is always defined
+      formattedDate: dt.toFormat("dd-MM-yyyy HH:mm"),
     };
+
+    // Cache the result
+    dateCache.set(dateString, result);
+    return result;
   }
 
-  // Use the Occurrence type for the function parameter
   function selectOccurrence(occurrence: Occurrence) {
     if (
       !occurrence ||
@@ -275,28 +460,44 @@
     }).toISO();
   }
 
-  $: filteredOccurrences = occurrencesList.filter((occ) => {
-    const { fullDate, dateOnly, timeOnly, formattedDate } = occ.occurredOn;
+  // Debounce search to improve performance
+  let debouncedSearch = search;
+  let searchTimeout: number;
 
-    // New formatted date for table
-    const formattedDateForSearch = formatDateForTable(fullDate);
+  $: {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      debouncedSearch = search;
+    }, 250) as unknown as number;
+  }
 
-    return [
-      occ.name.toLowerCase(),
-      occ.severity.toLowerCase(),
-      occ.publicId.toLowerCase(),
-      fullDate.toLowerCase(),
-      dateOnly.toLowerCase(),
-      timeOnly.toLowerCase(),
-      formattedDate.toLowerCase(),
-      formattedDateForSearch.toLowerCase(), // Include the formatted date for search
-    ].some((field) => field.includes(search.toLowerCase()));
-  });
+  // Add throttled filtering to prevent UI freezes
+  $: {
+    if (debouncedSearch !== undefined) {
+      const searchTerm = debouncedSearch.toLowerCase();
+      filteredOccurrences = occurrencesList.filter((occ) => {
+        const { fullDate, dateOnly, timeOnly, formattedDate } = occ.occurredOn;
+
+        // New formatted date for table
+        const formattedDateForSearch = formatDateForTable(fullDate);
+
+        return [
+          occ.name.toLowerCase(),
+          occ.severity.toLowerCase(),
+          occ.publicId.toLowerCase(),
+          fullDate.toLowerCase(),
+          dateOnly.toLowerCase(),
+          timeOnly.toLowerCase(),
+          formattedDate.toLowerCase(),
+          formattedDateForSearch.toLowerCase(),
+        ].some((field) => field.includes(searchTerm));
+      });
+    }
+  }
 
   function toggleRefresh(): void {
     if (agentId) {
-      const from = DateTime.now().minus({ weeks: 4 }).toJSDate();
-      const to = DateTime.now().toJSDate();
+      updateDateRange(true);
     } else {
       console.error("Agent ID is unavailable.");
     }
@@ -351,11 +552,12 @@
   let decrementTimeRangeButtonEl: HTMLButtonElement;
   let fromDateInputSwitchEl: HTMLLabelElement;
   let timerangeSelectEl: HTMLSelectElement;
+  let autoRefreshButtonEl: HTMLButtonElement;
 
   afterUpdate(() => {
     if (refreshButtonEl) {
       context.createTooltip(refreshButtonEl, {
-        message: "Refresh the occurence list",
+        message: "Refresh the occurrence list",
       });
     }
     if (resetButtonEl) {
@@ -383,7 +585,12 @@
     }
     if (timerangeSelectEl) {
       context.createTooltip(timerangeSelectEl, {
-        message: "Choose a time range to retrieve the occurences",
+        message: "Choose a time range to retrieve the occurrences",
+      });
+    }
+    if (autoRefreshButtonEl) {
+      context.createTooltip(autoRefreshButtonEl, {
+        message: doAutoRefresh ? "Disable auto-refresh" : "Enable auto-refresh",
       });
     }
     // Add tooltips for copy buttons
@@ -394,18 +601,34 @@
     });
   });
 
+  // Cache formatting results
+  const formattedDateCache = new Map<string, string>();
+
   function formatDateForTable(dateString: string | undefined): string {
     if (!dateString) {
-      return "No Date Provided"; // Fallback in case the date is undefined
+      return "No Date Provided";
     }
+
+    // Check cache first
+    if (formattedDateCache.has(dateString)) {
+      return formattedDateCache.get(dateString)!;
+    }
+
     const dt = DateTime.fromISO(dateString);
-    return dt.toFormat("M/d/yyyy, h:mm a"); // Format matching the date picker
+    const result = dt.toFormat("M/d/yyyy, h:mm a");
+
+    // Cache the result
+    formattedDateCache.set(dateString, result);
+    return result;
   }
 </script>
 
 <div class="card">
   {#if loading}
     <div class="loading-state">
+      <div class="progress-container">
+        <div class="progress-bar" style="width: {loadProgress}%"></div>
+      </div>
       <div class="spinner">
         <svg
           preserveAspectRatio="xMidYMid meet"
@@ -416,11 +639,37 @@
         </svg>
       </div>
     </div>
+  {:else if error}
+    <div class="error-message">
+      <p>{error}</p>
+      <button class="ripple" on:click={toggleRefresh}>Try Again</button>
+    </div>
   {:else}
     <div class="card-header with-actions">
       <h3 class="card-title" data-testid="active-alarms-overview-card-title">
         Alarm snapshots
+        {#if lastRefreshTime}
+          <span class="last-updated">Last updated: {lastRefreshTime}</span>
+        {/if}
       </h3>
+
+      {#if warningMessage}
+        <div class="warning-message">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            height="24"
+            viewBox="0 -960 960 960"
+            width="24"
+          >
+            <path
+              d="M480-280q17 0 28.5-11.5T520-320q0-17-11.5-28.5T480-360q-17 0-28.5 11.5T440-320q0 17 11.5 28.5T480-280Zm-40-160h80v-240h-80v240Zm40 360q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z"
+              fill="#f57c00"
+            />
+          </svg>
+          <span>{warningMessage}</span>
+        </div>
+      {/if}
+
       <div class="actions-top">
         <div class="time-adjustment">
           <div class="input-switch">
@@ -454,7 +703,13 @@
                 /></svg
               ></button
             >
-            <input type="number" bind:value={minuteAdjustment} min="1" />
+            <input
+              type="number"
+              bind:value={minuteAdjustment}
+              min="1"
+              max="120"
+              title="Adjustment in minutes"
+            />
             <button
               on:click={incrementTimeRange}
               bind:this={incrementTimeRangeButtonEl}
@@ -494,18 +749,25 @@
           <select
             class="timerange-select"
             bind:value={selectedTimeRange}
-            on:change={updateDateRange}
+            on:change={() => updateDateRange()}
             bind:this={timerangeSelectEl}
           >
-            <option value="4 weeks">Last 4 Weeks</option>
-            <option value="3 months">Last 3 Months</option>
-            <option value="6 months">Last 6 Months</option>
-            <option value="1 year">Last 1 Year</option>
+            {#if agentId && ProblematicAgentHandler.isProblematicAgent(agentId)}
+              <option value={TimeRanges.ThreeDays}>Last 3 Days</option>
+              <option value={TimeRanges.OneWeek}>Last Week</option>
+              <option value={TimeRanges.FourWeeks}>Last 4 Weeks</option>
+            {:else}
+              <option value={TimeRanges.FourWeeks}>Last 4 Weeks</option>
+              <option value={TimeRanges.ThreeMonths}>Last 3 Months</option>
+              <option value={TimeRanges.SixMonths}>Last 6 Months</option>
+              <option value={TimeRanges.OneYear}>Last 1 Year</option>
+            {/if}
           </select>
           <button
             class="refresh ripple"
             on:click={toggleRefresh}
             bind:this={refreshButtonEl}
+            title="Refresh data"
           >
             <svg width="24" height="24" viewBox="0 -960 960 960">
               <path
@@ -514,9 +776,24 @@
             </svg>
           </button>
           <button
-            class="auto-refresh ripple"
+            class="auto-refresh ripple {doAutoRefresh ? 'active' : ''}"
+            on:click={toggleAutoRefresh}
+            bind:this={autoRefreshButtonEl}
+            title={doAutoRefresh
+              ? "Disable auto refresh"
+              : "Enable auto refresh"}
+          >
+            <svg width="24" height="24" viewBox="0 -960 960 960">
+              <path
+                d="M480-160q-133 0-226.5-93.5T160-480q0-133 93.5-226.5T480-800q133 0 226.5 93.5T800-480q0 133-93.5 226.5T480-160Zm0-80q100 0 170-70t70-170q0-100-70-170t-170-70q-100 0-170 70t-70 170q0 100 70 170t170 70Zm0-80q-67 0-113.5-46.5T320-480q0-67 46.5-113.5T480-640q67 0 113.5 46.5T640-480q0 67-46.5 113.5T480-320Zm0-160Z"
+              />
+            </svg>
+          </button>
+          <button
+            class="reset ripple"
             on:click={resetSelectedOccurrence}
             bind:this={resetButtonEl}
+            title="Reset to current day"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -535,6 +812,9 @@
     <div class="card-content">
       {#if loading}
         <div class="loading-state">
+          <div class="progress-container">
+            <div class="progress-bar" style="width: {loadProgress}%"></div>
+          </div>
           <div class="spinner">
             <svg
               preserveAspectRatio="xMidYMid meet"
@@ -551,82 +831,102 @@
             There are no occurrences available for the selected time period.
           </p>
           <p>Please try adjusting the time range above to view more data.</p>
+          <button class="ripple refresh-button" on:click={toggleRefresh}
+            >Refresh Data</button
+          >
         </div>
       {:else}
+        <div class="stats-bar">
+          <div class="stat">
+            <span class="stat-label">Total Occurrences:</span>
+            <span class="stat-value">{occurrencesList.length}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Shown:</span>
+            <span class="stat-value">{filteredOccurrences.length}</span>
+          </div>
+          {#if search}
+            <div class="stat">
+              <span class="stat-label">Filter:</span>
+              <span class="stat-value">{search}</span>
+              <button class="clear-filter" on:click={() => (search = "")}
+                >✕</button
+              >
+            </div>
+          {/if}
+        </div>
+
         <div
           class="table-wrapper"
           bind:clientWidth={tableWidth}
           on:scroll={handleTableScroll}
         >
-          {#if filteredOccurrences.length === 0}
-            <div class="no-occurrences-message">
-              <p>
-                There are no occurrences available for the selected time period.
-              </p>
-              <p>
-                Please try adjusting the time range above to view more data.
-              </p>
-            </div>
-          {:else}
-            <table class="base-table">
-              <thead>
-                <tr>
-                  <th class="id-column">ID</th>
-                  <th class="key-column">Alarm</th>
-                  <th class="key-column">Date</th>
-                  <th class="key-column">Severity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each filteredOccurrences as occurrence}
-                  <tr on:click={() => selectOccurrence(occurrence)}>
-                    <td class="id-column">
-                      <span>{occurrence.publicId}</span>
-                      <button
-                        class="copy-button {copySuccess[occurrence.publicId]
-                          ? 'success'
-                          : ''}"
-                        on:click|stopPropagation={() =>
-                          copyToClipboard(occurrence.publicId)}
-                      >
-                        {#if copySuccess[occurrence.publicId]}
-                          <!-- Display a check icon on success -->
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            height="24px"
-                            viewBox="0 -960 960 960"
-                            width="24px"
-                            fill="#4caf50"
-                          >
-                            <path
-                              d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"
-                            />
-                          </svg>
-                        {:else}
-                          <!-- Original copy icon -->
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            height="24px"
-                            viewBox="0 -960 960 960"
-                            width="16px"
-                            fill="currentColor"
-                          >
-                            <path
-                              d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"
-                            />
-                          </svg>
-                        {/if}
-                      </button>
-                    </td>
-                    <td>{occurrence.name}</td>
-                    <td>{formatDateForTable(occurrence.occurredOn.fullDate)}</td
+          <table class="base-table">
+            <thead>
+              <tr>
+                <th class="id-column">ID</th>
+                <th class="key-column">Alarm</th>
+                <th class="key-column">Date</th>
+                <th class="key-column">Severity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each filteredOccurrences as occurrence (occurrence.publicId)}
+                <tr
+                  class="table-row"
+                  on:click={() => selectOccurrence(occurrence)}
+                >
+                  <td class="id-column">
+                    <span class="id-text">{occurrence.publicId}</span>
+                    <button
+                      class="copy-button {copySuccess[occurrence.publicId]
+                        ? 'success'
+                        : ''}"
+                      on:click|stopPropagation={() =>
+                        copyToClipboard(occurrence.publicId)}
+                      title="Copy ID to clipboard"
                     >
-                    <td>{occurrence.severity}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          {/if}
+                      {#if copySuccess[occurrence.publicId]}
+                        <!-- Display a check icon on success -->
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          height="24px"
+                          viewBox="0 -960 960 960"
+                          width="24px"
+                          fill="#4caf50"
+                        >
+                          <path
+                            d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"
+                          />
+                        </svg>
+                      {:else}
+                        <!-- Original copy icon -->
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          height="24px"
+                          viewBox="0 -960 960 960"
+                          width="16px"
+                          fill="currentColor"
+                        >
+                          <path
+                            d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"
+                          />
+                        </svg>
+                      {/if}
+                    </button>
+                  </td>
+                  <td>{occurrence.name}</td>
+                  <td>{formatDateForTable(occurrence.occurredOn.fullDate)}</td>
+                  <td>
+                    <span
+                      class="severity-indicator {occurrence.severity.toLowerCase()}"
+                    ></span>
+                    {occurrence.severity}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         </div>
       {/if}
     </div>
@@ -640,6 +940,106 @@
   @import "./styles/refresh";
   @import "./styles/ripple";
   @import "./styles/search-input";
+
+  .last-updated {
+    font-size: 12px;
+    font-weight: normal;
+    color: var(--text-muted, #777);
+    margin-left: 10px;
+  }
+
+  .progress-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background-color: #f1f1f1;
+    overflow: hidden;
+  }
+
+  .progress-bar {
+    height: 100%;
+    background-color: var(--primary, #4285f4);
+    transition: width 0.3s ease;
+  }
+
+  .error-message {
+    text-align: center;
+    padding: 20px;
+    color: #d32f2f;
+
+    button {
+      margin-top: 10px;
+      background-color: #f1f1f1;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+
+      &:hover {
+        background-color: #e0e0e0;
+      }
+    }
+  }
+
+  .stats-bar {
+    display: flex;
+    padding: 8px;
+    border-bottom: 1px solid var(--card-border-color, #ddd);
+    margin-bottom: 8px;
+    background-color: var(--card-bg-color, #f9f9f9);
+
+    .stat {
+      margin-right: 20px;
+      display: flex;
+      align-items: center;
+
+      .stat-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary, #666);
+        margin-right: 5px;
+      }
+
+      .stat-value {
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .clear-filter {
+        border: none;
+        background: none;
+        color: var(--text-secondary, #666);
+        cursor: pointer;
+        margin-left: 5px;
+        font-size: 12px;
+
+        &:hover {
+          color: var(--text-primary, #333);
+        }
+      }
+    }
+  }
+
+  .warning-message {
+    display: flex;
+    align-items: center;
+    background-color: #fff3e0;
+    border-left: 4px solid #f57c00;
+    padding: 8px 16px;
+    margin-bottom: 16px;
+    border-radius: 4px;
+
+    svg {
+      margin-right: 8px;
+    }
+
+    span {
+      font-size: 14px;
+      color: #333;
+    }
+  }
 
   .copy-button {
     transition: color 0.3s ease; // Smooth color transition
@@ -800,41 +1200,52 @@
     margin-left: 8px;
     margin-right: 6px;
   }
+
   .base-table th,
   .base-table td {
     text-align: left; /* Aligns text to the left */
-    vertical-align: top; /* Aligns content to the top of the cell */
+    vertical-align: middle; /* Center content vertically */
+    padding: 8px 16px;
   }
+
   .base-table {
     border-collapse: collapse; /* Ensures borders between cells are merged */
   }
+
   .card-header {
     margin-bottom: 40px;
     .actions-top {
       display: flex;
       flex-direction: row;
+      flex-wrap: wrap;
+      gap: 10px;
     }
   }
+
   .card-content {
     position: relative;
   }
+
   .loading-state {
     width: inherit;
     height: inherit;
     display: flex;
     justify-content: center;
     align-items: center;
+    flex-direction: column;
   }
+
   .table-wrapper {
     position: absolute;
     left: 0;
     right: 0;
-    top: -9px;
+    top: 40px; /* Adjusted to make room for stats bar */
     bottom: 0;
     padding: 8px;
     overflow: auto;
     overflow-anchor: none;
   }
+
   .table-header-drop-shadow {
     position: absolute;
     z-index: 10;
@@ -845,12 +1256,12 @@
     background: var(--basic);
     box-shadow: 0 2px 2px 0 var(--card-border-color);
   }
+
   table.base-table {
     width: 100%;
     tr td {
       font-size: 14px;
       white-space: nowrap;
-      padding-right: 24px;
     }
     thead {
       tr {
@@ -864,6 +1275,8 @@
           text-overflow: ellipsis;
           max-width: 7em;
           z-index: 10;
+          font-weight: 600;
+          padding: 12px 16px;
         }
       }
     }
@@ -871,23 +1284,121 @@
       background-color: rgb(0 0 0 / 4%) !important;
       cursor: pointer;
     }
+
+    .table-row {
+      transition: background-color 0.2s ease;
+
+      &:nth-child(even) {
+        background-color: rgba(0, 0, 0, 0.02);
+      }
+    }
   }
+
+  .id-column {
+    max-width: 200px;
+
+    .id-text {
+      display: inline-block;
+      max-width: 150px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .severity-indicator {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+
+    &.high,
+    &.critical {
+      background-color: #f44336;
+    }
+
+    &.medium,
+    &.warning {
+      background-color: #ff9800;
+    }
+
+    &.low,
+    &.info {
+      background-color: #2196f3;
+    }
+
+    &.normal {
+      background-color: #4caf50;
+    }
+  }
+
   .no-search-results {
     font-size: 14px;
     margin-bottom: 16px;
   }
+
   .no-occurrences-message {
     text-align: center;
     font-size: 16px;
     color: #555; // Subtle color to match the UI theme
     padding: 40px 0; // Extra padding to give the message room to breathe
-    background-color: #f9f9f9; // Slight background color change for emphasis
+    background-color: var(
+      --card-bg-color,
+      #f9f9f9
+    ); // Slight background color change for emphasis
 
     p {
       margin: 8px 0;
     }
+
+    .refresh-button {
+      background-color: var(--button-bg, #f1f1f1);
+      border: none;
+      border-radius: 4px;
+      padding: 8px 16px;
+      margin-top: 16px;
+      cursor: pointer;
+      font-size: 14px;
+
+      &:hover {
+        background-color: var(--button-hover-bg, #e0e0e0);
+      }
+    }
   }
+
+  .auto-refresh {
+    &.active {
+      background-color: var(--button-active-bg, rgba(0, 0, 0, 0.1)) !important;
+    }
+  }
+
   .key-column {
     height: 20px;
+  }
+
+  @media (max-width: 768px) {
+    .actions-top {
+      flex-direction: column;
+      align-items: flex-start;
+
+      .time-adjustment {
+        margin-bottom: 10px;
+      }
+
+      .search-input-container {
+        width: 100% !important;
+        margin-bottom: 10px;
+      }
+
+      .refresh-container {
+        width: 100%;
+        justify-content: space-between;
+      }
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+    }
   }
 </style>
