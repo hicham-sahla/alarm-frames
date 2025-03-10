@@ -8,3 +8,14 @@ export interface Alarm {
   severity: string;
   source: ResLink | null;
 }
+
+export interface PageInfo {
+  page: number;
+  limit: number;
+}
+
+export interface PagedResult<T> {
+  items: T[];
+  hasMore: boolean;
+  totalCount: number;
+}
