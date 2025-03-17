@@ -88,3 +88,250 @@ $card-header-height: 40px;
     margin-top: -4px;
   }
 }
+.copy-button {
+  transition: color 0.3s ease; // Smooth color transition
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #333; // Default color
+  margin-left: 8px;
+  vertical-align: middle;
+  font-size: 16px;
+  float: right;
+
+  &:hover {
+    color: #555; // Hover color
+    animation: pulse 1s infinite;
+  }
+
+  @keyframes pulse {
+    0% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+
+  &.success svg {
+    fill: #4caf50; // Green color indicating success
+  }
+}
+
+.time-adjustment {
+  .input-switch {
+    display: flex;
+    align-items: center;
+    position: relative;
+    user-select: none;
+    font-family: inherit; // Ensures the switch uses the app's default font
+    margin-top: 13px;
+
+    .switch-label {
+      color: var(--text-color, #333);
+      padding: 0 10px;
+    }
+
+    .input {
+      opacity: 0;
+      position: absolute;
+      z-index: -1;
+    }
+
+    .switch {
+      cursor: pointer;
+      width: 50px;
+      height: 25px;
+      background: var(--deactivated-color, #34a45c); // Default background
+      border-radius: 2px; // Reduced for a more rectangular look
+      position: relative;
+      transition: background-color 0.3s ease;
+
+      &:before {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 21px;
+        height: 21px;
+        background: white;
+        border-radius: 0px; // Zero for square toggle
+        transition: transform 0.3s ease, background-color 0.3s ease;
+      }
+    }
+
+    .input:checked + .switch {
+      background: var(
+        --activated-color,
+        #739ce6
+      ); // Change background on active
+
+      &:before {
+        transform: translateX(25px); // Move the toggle to the right
+      }
+    }
+  }
+  display: flex;
+  align-items: center;
+  .button-group {
+    margin-left: 5px;
+    margin-top: 16px;
+    display: flex;
+    background-color: var(
+      --input-background-color,
+      #fff
+    ); // Assuming default fallback
+    border: 0.5px solid var(--input-border-color, #ccc); // Match border with other inputs
+    border-radius: 4px;
+    overflow: hidden;
+    height: 36px;
+
+    button {
+      width: 0px;
+      flex: 1;
+      padding: 0px;
+      font-size: 18px;
+      background-color: transparent;
+      border: none !important;
+      cursor: pointer;
+      color: var(--text-color, #333);
+
+      &:hover {
+        background-color: var(--button-hover-bg-color, #eee);
+      }
+
+      &:not(:last-child) {
+        border-right: 1px solid var(--input-border-color, #ccc);
+      }
+      svg {
+        margin-top: 3px;
+        fill: var(--button-icon-color, #666); // Default icon color
+        transition: fill 0.3s ease; // Smooth transition for color change
+
+        &:hover {
+          fill: var(--button-icon-hover-color, #333); // Change color on hover
+        }
+      }
+    }
+  }
+
+  input[type="number"] {
+    flex: 1; // Make input take available space to match size with search input
+    text-align: center;
+    border: none !important; // Remove border inside the group
+    background-color: transparent; // Use transparent background inside the group
+    color: var(--text-color, #333);
+    width: 50%;
+    line-height: 38px; // Center text vertically
+    &:focus {
+      outline: none; // Remove focus outline inside the button group
+    }
+
+    -webkit-appearance: none;
+    appearance: none;
+  }
+}
+
+.timerange-select {
+  background: var(--basic);
+  border: 1px solid var(--card-border-color);
+  border-radius: 4px;
+  color: var(--text-color);
+  font-size: 14px;
+  padding: 4px 8px;
+  margin-left: 8px;
+  margin-right: 6px;
+}
+.base-table th,
+.base-table td {
+  text-align: left; /* Aligns text to the left */
+  vertical-align: top; /* Aligns content to the top of the cell */
+}
+.base-table {
+  border-collapse: collapse; /* Ensures borders between cells are merged */
+}
+.card-header {
+  margin-bottom: 40px;
+  .actions-top {
+    display: flex;
+    flex-direction: row;
+  }
+}
+.card-content {
+  position: relative;
+}
+.loading-state {
+  width: inherit;
+  height: inherit;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.table-wrapper {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -9px;
+  bottom: 0;
+  padding: 8px;
+  overflow: auto;
+  overflow-anchor: none;
+}
+.table-header-drop-shadow {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 42px;
+  background: var(--basic);
+  box-shadow: 0 2px 2px 0 var(--card-border-color);
+}
+table.base-table {
+  width: 100%;
+  tr td {
+    font-size: 14px;
+    white-space: nowrap;
+    padding-right: 24px;
+  }
+  thead {
+    tr {
+      border-bottom: none;
+      th {
+        position: sticky;
+        white-space: nowrap;
+        background: var(--basic);
+        top: -10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 7em;
+        z-index: 10;
+      }
+    }
+  }
+  tbody tr:hover {
+    background-color: rgb(0 0 0 / 4%) !important;
+    cursor: pointer;
+  }
+}
+.no-search-results {
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+.no-occurrences-message {
+  text-align: center;
+  font-size: 16px;
+  color: #555; // Subtle color to match the UI theme
+  padding: 40px 0; // Extra padding to give the message room to breathe
+  background-color: #f9f9f9; // Slight background color change for emphasis
+
+  p {
+    margin: 8px 0;
+  }
+}
+.key-column {
+  height: 20px;
+}
