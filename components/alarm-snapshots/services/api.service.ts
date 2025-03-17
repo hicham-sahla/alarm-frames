@@ -37,43 +37,61 @@ export class ApiService {
 
   async getAlarmsAndOccurrences(
     agentId: string,
-    from: Date,
-    to: Date
-  ): Promise<Alarm[]> {
-    const startDate = DateTime.fromJSDate(from).toUTC(); // Renamed from fourWeeksAgo
-    const endDate = DateTime.fromJSDate(to).toUTC(); // Renamed from currentDate
-    console.log("Startdate and Enddate API", startDate, endDate);
+    pageSize: number = 50,
+    pageAfter?: string,
+    searchQuery?: string
+  ): Promise<{ alarms: Alarm[]; moreAfter?: string }> {
     const alarmsUrl = this.context.getApiUrl("AgentDataAlarmList", { agentId });
     const occurrencesUrl = this.context.getApiUrl(
       "AgentDataAlarmOccurrenceList",
       { agentId }
     );
 
-    const dateFilter = [
-      `gte(occurredOn,"${startDate
-        .set({ milliseconds: 0 })
-        .toISO({ suppressMilliseconds: true })}")`, // Use startDate
-      `lte(occurredOn,"${endDate
-        .set({ milliseconds: 0 })
-        .toISO({ suppressMilliseconds: true })}")`, // Use endDate
-    ];
-    console.log("Date Filter", dateFilter);
-    const [alarmsResponse, occurrencesResponse] = await Promise.all([
-      this.recursiveFetch(alarmsUrl, ["name", "severity"]),
-      this.recursiveFetch(
-        occurrencesUrl,
-        ["alarm.publicId", "occurredOn"],
-        dateFilter
-      ),
+    // Create filters array for search if provided
+    const filters: string[] = [];
+
+    // Add search filter if a query is provided
+    if (searchQuery && searchQuery.trim() !== "") {
+      const searchTerms = searchQuery.toLowerCase().trim().split(" ");
+      const searchFilters = searchTerms.map(
+        (term) =>
+          `or(contains(publicId,"${term}"),contains(alarm.name,"${term}"))`
+      );
+      if (searchFilters.length > 0) {
+        filters.push(searchFilters.join(","));
+      }
+    }
+
+    // Get all alarms (non-paginated)
+    const alarmsResponse = await this.recursiveFetch(alarmsUrl, [
+      "name",
+      "severity",
     ]);
 
-    return alarmsResponse.map((alarm: any) => ({
+    // Get occurrences with pagination
+    const occurrencesResponse = await this.recursiveFetch(
+      occurrencesUrl,
+      ["alarm.publicId", "occurredOn", "publicId"],
+      filters,
+      [],
+      pageAfter,
+      pageSize,
+      true // single page mode
+    );
+
+    // Map occurrences to alarms
+    const alarms = alarmsResponse.map((alarm: any) => ({
       ...alarm,
-      occurrences: occurrencesResponse.filter(
+      occurrences: occurrencesResponse.data.filter(
         (occ: AgentDataAlarmOccurrence) =>
           occ.alarm && occ.alarm.publicId === alarm.publicId
       ),
     }));
+
+    return {
+      alarms,
+      moreAfter: occurrencesResponse.moreAfter,
+    };
   }
 
   async recursiveFetch(
@@ -81,15 +99,23 @@ export class ApiService {
     fields: string[] = [],
     filters: string[] = [],
     items: any[] = [],
-    pageAfter?: string
-  ): Promise<any[]> {
+    pageAfter?: string,
+    pageSize: number = 50,
+    singlePage: boolean = false
+  ): Promise<any> {
     const requestUrl = new URL(url);
+
     if (pageAfter) {
       requestUrl.searchParams.set("page-after", pageAfter);
     }
+
+    // Set page size parameter
+    requestUrl.searchParams.set("page-size", pageSize.toString());
+
     if (fields.length) {
       requestUrl.searchParams.set("fields", fields.join(","));
     }
+
     if (filters.length) {
       // for each filter set filters=filter1&filters=filter2
       filters.forEach((filter) => {
@@ -100,15 +126,26 @@ export class ApiService {
     const response = await this.fetch(requestUrl.toString());
     const newData = items.concat(response.data);
 
+    // If singlePage is true, return the current page with pagination info
+    if (singlePage) {
+      return {
+        data: response.data,
+        moreAfter: response.moreAfter,
+      };
+    }
+
+    // Otherwise, continue recursive fetching for all pages
     if (response.moreAfter) {
       return this.recursiveFetch(
         url,
         fields,
         filters,
         newData,
-        response.moreAfter
+        response.moreAfter,
+        pageSize
       );
     }
+
     return newData;
   }
 }

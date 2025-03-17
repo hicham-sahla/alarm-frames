@@ -39,23 +39,12 @@
   let from = "";
   let to = "";
 
-  enum TimeRanges {
-    FourWeeks = "4 weeks",
-    ThreeMonths = "3 months",
-    SixMonths = "6 months",
-    OneYear = "1 year",
-  }
-
-  const timeRangeOptions: {
-    [K in TimeRanges]: { weeks?: number; months?: number; years?: number };
-  } = {
-    [TimeRanges.FourWeeks]: { weeks: 4 },
-    [TimeRanges.ThreeMonths]: { months: 3 },
-    [TimeRanges.SixMonths]: { months: 6 },
-    [TimeRanges.OneYear]: { years: 1 },
-  };
-
-  let selectedTimeRange: TimeRanges = TimeRanges.FourWeeks;
+  // Pagination variables
+  let pageSize = 50;
+  let currentPageAfter: string | undefined = undefined;
+  let hasMoreData = true;
+  let isLoadingMore = false;
+  let searchTimeout: number | undefined;
 
   let isToDate = false; // Default to adjusting 'from'
 
@@ -86,7 +75,7 @@
           ) {
             agentId = results[0].data.publicId;
             if (agentId) {
-              await selectFirstNonEmptyRange();
+              await loadInitialData();
             }
           }
         }
@@ -96,35 +85,19 @@
     }
   });
 
-  function updateDateRange() {
-    if (!agentId) {
-      return;
-    }
+  async function loadInitialData() {
+    if (!agentId) return;
 
-    const duration = timeRangeOptions[selectedTimeRange];
-    const fromDt = DateTime.now().minus(duration).toUTC();
-    const toDt = DateTime.now().toUTC();
-    fetchData(agentId, fromDt.toJSDate(), toDt.toJSDate());
-  }
-
-  function handleTableScroll(event: Event): void {
-    tableScrollTop = (event.target as HTMLDivElement).scrollTop;
-  }
-
-  async function fetchData(
-    agentId: string,
-    from: Date,
-    to: Date
-  ): Promise<boolean> {
     loading = true;
     try {
-      let alarms = await alarmsManager.getAllAlarmOccurrencesForAgent(
+      const result = await alarmsManager.getAllAlarmOccurrencesForAgent(
         agentId,
-        from,
-        to
+        pageSize,
+        undefined,
+        search.trim() !== "" ? search : undefined
       );
 
-      occurrencesList = alarms
+      occurrencesList = result.alarms
         .flatMap((alarm) =>
           alarm.occurrences.map((occ) => ({
             name: alarm.name,
@@ -140,34 +113,69 @@
           );
         });
 
-      return occurrencesList.length > 0;
+      currentPageAfter = result.moreAfter;
+      hasMoreData = !!result.moreAfter;
     } catch (error) {
-      console.error("Error fetching data:", error);
-      return false;
+      console.error("Error fetching initial data:", error);
     } finally {
       loading = false;
     }
   }
 
-  async function selectFirstNonEmptyRange() {
-    if (!agentId) return;
+  function handleTableScroll(event: Event): void {
+    const target = event.target as HTMLDivElement;
+    tableScrollTop = target.scrollTop;
 
-    for (const timeRange of Object.keys(timeRangeOptions) as TimeRanges[]) {
-      const duration = timeRangeOptions[timeRange];
-      const fromDt = DateTime.now().minus(duration).toUTC();
-      const toDt = DateTime.now().toUTC();
-
-      const hasData = await fetchData(
-        agentId,
-        fromDt.toJSDate(),
-        toDt.toJSDate()
-      );
-      if (hasData) {
-        selectedTimeRange = timeRange;
-        break;
-      }
+    // Check if we're near the bottom to trigger loading more data
+    if (
+      hasMoreData &&
+      !isLoadingMore &&
+      target.scrollHeight - target.scrollTop - target.clientHeight < 200
+    ) {
+      loadMoreData();
     }
   }
+
+  async function loadMoreData() {
+    if (!agentId || !hasMoreData || isLoadingMore) return;
+
+    isLoadingMore = true;
+    try {
+      const result = await alarmsManager.getAllAlarmOccurrencesForAgent(
+        agentId,
+        pageSize,
+        currentPageAfter,
+        search.trim() !== "" ? search : undefined
+      );
+
+      const newOccurrences = result.alarms
+        .flatMap((alarm) =>
+          alarm.occurrences.map((occ) => ({
+            name: alarm.name,
+            occurredOn: formatDate(occ.occurredOn),
+            severity: alarm.severity,
+            publicId: occ.publicId || "Unknown ID",
+          }))
+        )
+        .sort((a, b) => {
+          return (
+            DateTime.fromISO(b.occurredOn.fullDate).toMillis() -
+            DateTime.fromISO(a.occurredOn.fullDate).toMillis()
+          );
+        });
+
+      // Append new occurrences to the existing list
+      occurrencesList = [...occurrencesList, ...newOccurrences];
+
+      currentPageAfter = result.moreAfter;
+      hasMoreData = !!result.moreAfter;
+    } catch (error) {
+      console.error("Error fetching more data:", error);
+    } finally {
+      isLoadingMore = false;
+    }
+  }
+
   function formatDate(dateString: string | undefined) {
     if (!dateString) {
       // Return a default object where no fields are undefined
@@ -275,28 +283,35 @@
     }).toISO();
   }
 
-  $: filteredOccurrences = occurrencesList.filter((occ) => {
-    const { fullDate, dateOnly, timeOnly, formattedDate } = occ.occurredOn;
+  // Search functionality
+  function handleSearchInput() {
+    // Clear any pending timeouts
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
 
-    // New formatted date for table
-    const formattedDateForSearch = formatDateForTable(fullDate);
+    // Set a new timeout to debounce the search
+    searchTimeout = setTimeout(() => {
+      // Reset pagination and reload data with search
+      currentPageAfter = undefined;
+      hasMoreData = true;
+      occurrencesList = [];
 
-    return [
-      occ.name.toLowerCase(),
-      occ.severity.toLowerCase(),
-      occ.publicId.toLowerCase(),
-      fullDate.toLowerCase(),
-      dateOnly.toLowerCase(),
-      timeOnly.toLowerCase(),
-      formattedDate.toLowerCase(),
-      formattedDateForSearch.toLowerCase(), // Include the formatted date for search
-    ].some((field) => field.includes(search.toLowerCase()));
-  });
+      if (agentId) {
+        loadInitialData();
+      }
+    }, 300); // 300ms debounce
+  }
+
+  $: filteredOccurrences = occurrencesList;
 
   function toggleRefresh(): void {
     if (agentId) {
-      const from = DateTime.now().minus({ weeks: 4 }).toJSDate();
-      const to = DateTime.now().toJSDate();
+      // Reset pagination and reload data
+      currentPageAfter = undefined;
+      hasMoreData = true;
+      occurrencesList = [];
+      loadInitialData();
     } else {
       console.error("Agent ID is unavailable.");
     }
@@ -350,7 +365,6 @@
   let incrementTimeRangeButtonEl: HTMLButtonElement;
   let decrementTimeRangeButtonEl: HTMLButtonElement;
   let fromDateInputSwitchEl: HTMLLabelElement;
-  let timerangeSelectEl: HTMLSelectElement;
 
   afterUpdate(() => {
     if (refreshButtonEl) {
@@ -380,11 +394,6 @@
           message: "Toggle to adjust start or end date",
         }
       );
-    }
-    if (timerangeSelectEl) {
-      context.createTooltip(timerangeSelectEl, {
-        message: "Choose a time range to retrieve the occurences",
-      });
     }
     // Add tooltips for copy buttons
     document.querySelectorAll(".copy-button").forEach((button) => {
@@ -424,25 +433,27 @@
       <div class="actions-top">
         <div class="time-adjustment">
           <div class="input-switch">
-            <label class="switch-label">Start Date</label>
+            <!-- Fix A11y warnings by associating labels with inputs -->
+            <label for="toggleTarget" class="switch-label">Start Date</label>
             <input
               type="checkbox"
-              id="switchy"
+              id="toggleTarget"
               class="input"
               bind:checked={isToDate}
               on:change={toggleDateAdjustment}
             />
             <label
               bind:this={fromDateInputSwitchEl}
-              for="switchy"
+              for="toggleTarget"
               class="switch"
             ></label>
-            <label class="switch-label">End Date</label>
+            <label for="toggleTarget" class="switch-label">End Date</label>
           </div>
           <div class="button-group">
             <button
               on:click={decrementTimeRange}
               bind:this={decrementTimeRangeButtonEl}
+              aria-label="Decrease time range"
               ><svg
                 xmlns="http://www.w3.org/2000/svg"
                 height="24px"
@@ -454,10 +465,16 @@
                 /></svg
               ></button
             >
-            <input type="number" bind:value={minuteAdjustment} min="1" />
+            <input
+              type="number"
+              bind:value={minuteAdjustment}
+              min="1"
+              aria-label="Adjustment in minutes"
+            />
             <button
               on:click={incrementTimeRange}
               bind:this={incrementTimeRangeButtonEl}
+              aria-label="Increase time range"
               ><svg
                 xmlns="http://www.w3.org/2000/svg"
                 height="24px"
@@ -476,7 +493,7 @@
           style={isNarrow ? "width: 100px" : ""}
         >
           <div class="search-input-prefix">
-            <svg width="24" height="24" viewBox="0 0 24 24">
+            <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M0 0h24v24H0z" fill="none" />
               <path
                 d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"
@@ -487,27 +504,24 @@
             class="search-input"
             placeholder={translations?.SEARCH}
             bind:value={search}
+            on:input={handleSearchInput}
             style={isNarrow ? "display: flex" : ""}
+            aria-label="Search occurrences"
           />
         </div>
         <div class="refresh-container">
-          <select
-            class="timerange-select"
-            bind:value={selectedTimeRange}
-            on:change={updateDateRange}
-            bind:this={timerangeSelectEl}
-          >
-            <option value="4 weeks">Last 4 Weeks</option>
-            <option value="3 months">Last 3 Months</option>
-            <option value="6 months">Last 6 Months</option>
-            <option value="1 year">Last 1 Year</option>
-          </select>
           <button
             class="refresh ripple"
             on:click={toggleRefresh}
             bind:this={refreshButtonEl}
+            aria-label="Refresh data"
           >
-            <svg width="24" height="24" viewBox="0 -960 960 960">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 -960 960 960"
+              aria-hidden="true"
+            >
               <path
                 d="M204-318q-22-38-33-78t-11-82q0-134 93-228t227-94h7l-64-64 56-56 160 160-160 160-56-56 64-64h-7q-100 0-170 70.5T240-478q0 26 6 51t18 49l-60 60ZM481-40 321-200l160-160 56 56-64 64h7q100 0 170-70.5T720-482q0-26-6-51t-18-49l60-60q22 38 33 78t11 82q0 134-93 228t-227 94h-7l64 64-56 56Z"
               />
@@ -517,6 +531,7 @@
             class="auto-refresh ripple"
             on:click={resetSelectedOccurrence}
             bind:this={resetButtonEl}
+            aria-label="Reset occurrence selection"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -524,6 +539,7 @@
               viewBox="0 -960 960 960"
               width="24px"
               fill="#f44336"
+              aria-hidden="true"
               ><path
                 d="m656-120-56-56 84-84-84-84 56-56 84 84 84-84 56 56-83 84 83 84-56 56-84-83-84 83Zm-176 0q-138 0-240.5-91.5T122-440h82q14 104 92.5 172T480-200q11 0 20.5-.5T520-203v81q-10 1-19.5 1.5t-20.5.5ZM120-560v-240h80v94q51-64 124.5-99T480-840q150 0 255 105t105 255h-80q0-117-81.5-198.5T480-760q-69 0-129 32t-101 88h110v80H120Zm414 190-94-94v-216h80v184l56 56-42 70Z"
               /></svg
@@ -547,10 +563,8 @@
         </div>
       {:else if filteredOccurrences.length === 0}
         <div class="no-occurrences-message">
-          <p>
-            There are no occurrences available for the selected time period.
-          </p>
-          <p>Please try adjusting the time range above to view more data.</p>
+          <p>There are no occurrences available for the selected criteria.</p>
+          <p>Please try adjusting your search or refresh the data.</p>
         </div>
       {:else}
         <div
@@ -558,75 +572,83 @@
           bind:clientWidth={tableWidth}
           on:scroll={handleTableScroll}
         >
-          {#if filteredOccurrences.length === 0}
-            <div class="no-occurrences-message">
-              <p>
-                There are no occurrences available for the selected time period.
-              </p>
-              <p>
-                Please try adjusting the time range above to view more data.
-              </p>
-            </div>
-          {:else}
-            <table class="base-table">
-              <thead>
-                <tr>
-                  <th class="id-column">ID</th>
-                  <th class="key-column">Alarm</th>
-                  <th class="key-column">Date</th>
-                  <th class="key-column">Severity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each filteredOccurrences as occurrence}
-                  <tr on:click={() => selectOccurrence(occurrence)}>
-                    <td class="id-column">
-                      <span>{occurrence.publicId}</span>
-                      <button
-                        class="copy-button {copySuccess[occurrence.publicId]
-                          ? 'success'
-                          : ''}"
-                        on:click|stopPropagation={() =>
-                          copyToClipboard(occurrence.publicId)}
-                      >
-                        {#if copySuccess[occurrence.publicId]}
-                          <!-- Display a check icon on success -->
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            height="24px"
-                            viewBox="0 -960 960 960"
-                            width="24px"
-                            fill="#4caf50"
-                          >
-                            <path
-                              d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"
-                            />
-                          </svg>
-                        {:else}
-                          <!-- Original copy icon -->
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            height="24px"
-                            viewBox="0 -960 960 960"
-                            width="16px"
-                            fill="currentColor"
-                          >
-                            <path
-                              d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"
-                            />
-                          </svg>
-                        {/if}
-                      </button>
-                    </td>
-                    <td>{occurrence.name}</td>
-                    <td>{formatDateForTable(occurrence.occurredOn.fullDate)}</td
+          <table class="base-table">
+            <thead>
+              <tr>
+                <th class="id-column">ID</th>
+                <th class="key-column">Alarm</th>
+                <th class="key-column">Date</th>
+                <th class="key-column">Severity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each filteredOccurrences as occurrence}
+                <tr on:click={() => selectOccurrence(occurrence)}>
+                  <td class="id-column">
+                    <span>{occurrence.publicId}</span>
+                    <button
+                      class="copy-button {copySuccess[occurrence.publicId]
+                        ? 'success'
+                        : ''}"
+                      on:click|stopPropagation={() =>
+                        copyToClipboard(occurrence.publicId)}
+                      aria-label="Copy ID to clipboard"
                     >
-                    <td>{occurrence.severity}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          {/if}
+                      {#if copySuccess[occurrence.publicId]}
+                        <!-- Display a check icon on success -->
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          height="24px"
+                          viewBox="0 -960 960 960"
+                          width="24px"
+                          fill="#4caf50"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"
+                          />
+                        </svg>
+                      {:else}
+                        <!-- Original copy icon -->
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          height="24px"
+                          viewBox="0 -960 960 960"
+                          width="16px"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"
+                          />
+                        </svg>
+                      {/if}
+                    </button>
+                  </td>
+                  <td>{occurrence.name}</td>
+                  <td>{formatDateForTable(occurrence.occurredOn.fullDate)}</td>
+                  <td>{occurrence.severity}</td>
+                </tr>
+              {/each}
+            </tbody>
+            {#if isLoadingMore}
+              <tfoot>
+                <tr>
+                  <td colspan="4" style="text-align: center; padding: 10px;">
+                    <div class="spinner" style="display: inline-block;">
+                      <svg
+                        preserveAspectRatio="xMidYMid meet"
+                        focusable="false"
+                        viewBox="0 0 100 100"
+                      >
+                        <circle cx="50%" cy="50%" r="45" />
+                      </svg>
+                    </div>
+                  </td>
+                </tr>
+              </tfoot>
+            {/if}
+          </table>
         </div>
       {/if}
     </div>

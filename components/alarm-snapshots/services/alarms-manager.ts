@@ -13,13 +13,23 @@ export class AlarmsManager {
 
   async getAllAlarmOccurrencesForAgent(
     agentId: string,
-    from: Date,
-    to: Date
-  ): Promise<Alarm[]> {
+    pageSize: number = 50,
+    pageAfter?: string,
+    searchQuery?: string
+  ): Promise<{ alarms: Alarm[]; moreAfter?: string }> {
     console.log(
-      "Fetching all alarm data and occurrences for agent ID:",
-      agentId
+      "Fetching alarm data and occurrences for agent ID:",
+      agentId,
+      "with pageAfter:",
+      pageAfter,
+      "and searchQuery:",
+      searchQuery
     );
-    return this.apiService.getAlarmsAndOccurrences(agentId, from, to); // Ensure ApiService is adjusted to handle from and to dates
+    return this.apiService.getAlarmsAndOccurrences(
+      agentId,
+      pageSize,
+      pageAfter,
+      searchQuery
+    );
   }
 }
