@@ -34,6 +34,8 @@
 
   let agentId: string | null = null;
   let search = "";
+  let previousSearch = "";
+  let isSearchFocused = false;
   let translations: Record<string, string>;
 
   let from = "";
@@ -90,6 +92,10 @@
 
     loading = true;
     try {
+      console.log(
+        "Loading initial data with search:",
+        search.trim() !== "" ? search : undefined
+      );
       const result = await alarmsManager.getAllAlarmOccurrencesForAgent(
         agentId,
         pageSize,
@@ -115,6 +121,9 @@
 
       currentPageAfter = result.moreAfter;
       hasMoreData = !!result.moreAfter;
+
+      // Store current search to compare later
+      previousSearch = search;
     } catch (error) {
       console.error("Error fetching initial data:", error);
     } finally {
@@ -141,6 +150,10 @@
 
     isLoadingMore = true;
     try {
+      console.log(
+        "Loading more data with search:",
+        search.trim() !== "" ? search : undefined
+      );
       const result = await alarmsManager.getAllAlarmOccurrencesForAgent(
         agentId,
         pageSize,
@@ -193,6 +206,45 @@
       timeOnly: dt.toFormat("HH:mm"),
       formattedDate: dt.toFormat("dd-MM-yyyy HH:mm"), // Ensure formattedDate is always defined
     };
+  }
+
+  // Handle search focus state
+  function handleSearchFocus() {
+    isSearchFocused = true;
+  }
+
+  // Handle search blur - apply search when focus is lost
+  function handleSearchBlur() {
+    isSearchFocused = false;
+
+    // Only trigger search if the value has changed
+    if (search !== previousSearch) {
+      executeSearch();
+    }
+  }
+
+  // Handle search key press - apply on Enter key
+  function handleSearchKeyUp(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      executeSearch();
+    }
+  }
+
+  // Execute the search
+  function executeSearch() {
+    // Clear any pending timeouts
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+
+    // Reset pagination and reload data with search
+    currentPageAfter = undefined;
+    hasMoreData = true;
+    occurrencesList = [];
+
+    if (agentId) {
+      loadInitialData();
+    }
   }
 
   // Use the Occurrence type for the function parameter
@@ -281,26 +333,6 @@
     to = DateTime.fromMillis(context.timeRange.to, {
       zone: context.appData.timeZone,
     }).toISO();
-  }
-
-  // Search functionality
-  function handleSearchInput() {
-    // Clear any pending timeouts
-    if (searchTimeout) {
-      clearTimeout(searchTimeout);
-    }
-
-    // Set a new timeout to debounce the search
-    searchTimeout = setTimeout(() => {
-      // Reset pagination and reload data with search
-      currentPageAfter = undefined;
-      hasMoreData = true;
-      occurrencesList = [];
-
-      if (agentId) {
-        loadInitialData();
-      }
-    }, 300); // 300ms debounce
   }
 
   $: filteredOccurrences = occurrencesList;
@@ -504,7 +536,9 @@
             class="search-input"
             placeholder={translations?.SEARCH}
             bind:value={search}
-            on:input={handleSearchInput}
+            on:focus={handleSearchFocus}
+            on:blur={handleSearchBlur}
+            on:keyup={handleSearchKeyUp}
             style={isNarrow ? "display: flex" : ""}
             aria-label="Search occurrences"
           />

@@ -52,46 +52,49 @@ export class ApiService {
 
     // Add search filter if a query is provided
     if (searchQuery && searchQuery.trim() !== "") {
-      const searchTerms = searchQuery.toLowerCase().trim().split(" ");
-      const searchFilters = searchTerms.map(
-        (term) =>
-          `or(contains(publicId,"${term}"),contains(alarm.name,"${term}"))`
-      );
-      if (searchFilters.length > 0) {
-        filters.push(searchFilters.join(","));
-      }
+      // Use simple contains for publicId - this is the most reliable filter
+      filters.push(`contains(publicId,"${searchQuery.trim()}")`);
     }
 
-    // Get all alarms (non-paginated)
-    const alarmsResponse = await this.recursiveFetch(alarmsUrl, [
-      "name",
-      "severity",
-    ]);
+    try {
+      // Get all alarms (non-paginated)
+      const alarmsResponse = await this.recursiveFetch(alarmsUrl, [
+        "name",
+        "severity",
+      ]);
 
-    // Get occurrences with pagination
-    const occurrencesResponse = await this.recursiveFetch(
-      occurrencesUrl,
-      ["alarm.publicId", "occurredOn", "publicId"],
-      filters,
-      [],
-      pageAfter,
-      pageSize,
-      true // single page mode
-    );
+      // Get occurrences with pagination
+      const occurrencesResponse = await this.recursiveFetch(
+        occurrencesUrl,
+        ["alarm.publicId", "occurredOn", "publicId"],
+        filters,
+        [],
+        pageAfter,
+        pageSize,
+        true // single page mode
+      );
 
-    // Map occurrences to alarms
-    const alarms = alarmsResponse.map((alarm: any) => ({
-      ...alarm,
-      occurrences: occurrencesResponse.data.filter(
-        (occ: AgentDataAlarmOccurrence) =>
-          occ.alarm && occ.alarm.publicId === alarm.publicId
-      ),
-    }));
+      // Map occurrences to alarms
+      const alarms = alarmsResponse.map((alarm: any) => ({
+        ...alarm,
+        occurrences: occurrencesResponse.data.filter(
+          (occ: AgentDataAlarmOccurrence) =>
+            occ.alarm && occ.alarm.publicId === alarm.publicId
+        ),
+      }));
 
-    return {
-      alarms,
-      moreAfter: occurrencesResponse.moreAfter,
-    };
+      return {
+        alarms,
+        moreAfter: occurrencesResponse.moreAfter,
+      };
+    } catch (error) {
+      console.error("Error in getAlarmsAndOccurrences:", error);
+      // Return empty result to prevent crashing
+      return {
+        alarms: [],
+        moreAfter: undefined,
+      };
+    }
   }
 
   async recursiveFetch(
@@ -123,29 +126,41 @@ export class ApiService {
       });
     }
 
-    const response = await this.fetch(requestUrl.toString());
-    const newData = items.concat(response.data);
+    try {
+      const response = await this.fetch(requestUrl.toString());
+      const newData = items.concat(response.data || []);
 
-    // If singlePage is true, return the current page with pagination info
-    if (singlePage) {
-      return {
-        data: response.data,
-        moreAfter: response.moreAfter,
-      };
+      // If singlePage is true, return the current page with pagination info
+      if (singlePage) {
+        return {
+          data: response.data || [],
+          moreAfter: response.moreAfter,
+        };
+      }
+
+      // Otherwise, continue recursive fetching for all pages
+      if (response.moreAfter) {
+        return this.recursiveFetch(
+          url,
+          fields,
+          filters,
+          newData,
+          response.moreAfter,
+          pageSize
+        );
+      }
+
+      return newData;
+    } catch (error) {
+      console.error(`Error in recursiveFetch for ${url}:`, error);
+      // Return empty result to prevent crashing
+      if (singlePage) {
+        return {
+          data: [],
+          moreAfter: undefined,
+        };
+      }
+      return items;
     }
-
-    // Otherwise, continue recursive fetching for all pages
-    if (response.moreAfter) {
-      return this.recursiveFetch(
-        url,
-        fields,
-        filters,
-        newData,
-        response.moreAfter,
-        pageSize
-      );
-    }
-
-    return newData;
   }
 }
