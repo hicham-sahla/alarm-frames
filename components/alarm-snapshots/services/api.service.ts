@@ -227,7 +227,7 @@ export class ApiService {
       if (nullAlarmOccurrences.length > 0) {
         processedAlarms.push({
           publicId: "null-alarm-occurrences",
-          name: "Unbound Occurrences",
+          name: "Unbound Alarm",
           severity: "unknown",
           occurrences: nullAlarmOccurrences,
           agent: null as any,
