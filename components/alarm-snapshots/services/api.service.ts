@@ -5,9 +5,17 @@ import type {
 import type { Alarm } from "../types";
 import { DateTime } from "luxon";
 
+interface CacheItem {
+  data: any;
+  timestamp: number;
+  expiresAt: number;
+}
+
 export class ApiService {
   context: ComponentContext;
-  headers: {};
+  headers: Record<string, string>;
+  cache: Map<string, CacheItem> = new Map();
+  cacheTTL: number = 5 * 60 * 1000; // 5 minutes in milliseconds
 
   constructor(context: ComponentContext) {
     this.context = context;
@@ -18,149 +26,225 @@ export class ApiService {
       "Api-Company": context.appData.company.publicId,
       "Api-Version": "2",
     };
-    console.log(context);
   }
 
-  async fetch(url: string): Promise<any> {
-    console.log(`Fetching from URL: ${url}`);
-    return fetch(url, { method: "GET", headers: this.headers })
-      .then((response) => {
-        if (!response.ok)
-          throw new Error(`HTTP error! status: ${response.status}`);
-        return response.json();
-      })
-      .catch((error) => {
-        console.error(`Error fetching from ${url}:`, error);
-        throw error;
+  /**
+   * Get cache key for a request
+   */
+  getCacheKey(url: string, params?: Record<string, any>): string {
+    let key = url;
+    if (params) {
+      key += JSON.stringify(params);
+    }
+    return key;
+  }
+
+  /**
+   * Check if a cached item is valid
+   */
+  isCacheValid(cacheItem: CacheItem): boolean {
+    return Date.now() < cacheItem.expiresAt;
+  }
+
+  /**
+   * Get data from cache or fetch from API
+   */
+  async fetchWithCache(
+    url: string,
+    params?: Record<string, any>,
+    forceFresh: boolean = false
+  ): Promise<any> {
+    const cacheKey = this.getCacheKey(url, params);
+
+    // Return from cache if available and not force refreshing
+    if (!forceFresh && this.cache.has(cacheKey)) {
+      const cachedItem = this.cache.get(cacheKey)!;
+      if (this.isCacheValid(cachedItem)) {
+        console.log(`Using cached data for ${cacheKey}`);
+        return cachedItem.data;
+      }
+    }
+
+    // Fetch fresh data
+    console.log(`Fetching fresh data for ${url}`);
+    try {
+      const requestUrl = new URL(url);
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (Array.isArray(value)) {
+            value.forEach((item) => requestUrl.searchParams.append(key, item));
+          } else if (value !== undefined) {
+            requestUrl.searchParams.set(key, value.toString());
+          }
+        });
+      }
+
+      const response = await fetch(requestUrl.toString(), {
+        method: "GET",
+        headers: this.headers,
       });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`HTTP error! status: ${response.status}`, errorText);
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Store in cache
+      this.cache.set(cacheKey, {
+        data,
+        timestamp: Date.now(),
+        expiresAt: Date.now() + this.cacheTTL,
+      });
+
+      return data;
+    } catch (error) {
+      console.error(`Error fetching from ${url}:`, error);
+      throw error;
+    }
   }
 
+  /**
+   * Clear the entire cache or specific items
+   */
+  clearCache(cacheKey?: string) {
+    if (cacheKey) {
+      this.cache.delete(cacheKey);
+    } else {
+      this.cache.clear();
+    }
+  }
+
+  /**
+   * Get alarms and occurrences with optimized pagination
+   */
   async getAlarmsAndOccurrences(
     agentId: string,
     pageSize: number = 50,
     pageAfter?: string,
-    searchQuery?: string
+    searchQuery?: string,
+    forceFresh: boolean = false
   ): Promise<{ alarms: Alarm[]; moreAfter?: string }> {
-    const alarmsUrl = this.context.getApiUrl("AgentDataAlarmList", { agentId });
-    const occurrencesUrl = this.context.getApiUrl(
-      "AgentDataAlarmOccurrenceList",
-      { agentId }
-    );
-
-    // Create filters array for search if provided
-    const filters: string[] = [];
-
-    // Add search filter if a query is provided
-    if (searchQuery && searchQuery.trim() !== "") {
-      // Use simple contains for publicId - this is the most reliable filter
-      filters.push(`contains(publicId,"${searchQuery.trim()}")`);
-    }
+    console.log("getAlarmsAndOccurrences Input:", {
+      agentId,
+      pageSize,
+      pageAfter,
+      searchQuery,
+    });
 
     try {
-      // Get all alarms (non-paginated)
-      const alarmsResponse = await this.recursiveFetch(alarmsUrl, [
-        "name",
-        "severity",
-      ]);
+      // 1. Fetch alarms (this is usually a smaller dataset)
+      const alarmsUrl = this.context.getApiUrl("AgentDataAlarmList", {
+        agentId,
+      });
 
-      // Get occurrences with pagination
-      const occurrencesResponse = await this.recursiveFetch(
-        occurrencesUrl,
-        ["alarm.publicId", "occurredOn", "publicId"],
-        filters,
-        [],
-        pageAfter,
-        pageSize,
-        true // single page mode
+      // Only request the fields we need
+      const alarmsParams = {
+        fields: ["publicId", "name", "severity"],
+        "page-size": 500, // Get more alarms at once since it's typically a small dataset
+      };
+
+      // Cache alarms separately as they change less frequently
+      const alarmsResponse = await this.fetchWithCache(
+        alarmsUrl,
+        alarmsParams,
+        forceFresh
       );
 
-      // Map occurrences to alarms
-      const alarms = alarmsResponse.map((alarm: any) => ({
-        ...alarm,
-        occurrences: occurrencesResponse.data.filter(
-          (occ: AgentDataAlarmOccurrence) =>
-            occ.alarm && occ.alarm.publicId === alarm.publicId
-        ),
-      }));
+      // 2. Fetch occurrences with pagination
+      const occurrencesUrl = this.context.getApiUrl(
+        "AgentDataAlarmOccurrenceList",
+        { agentId }
+      );
+
+      // Build optimized parameters
+      const occurrencesParams: Record<string, any> = {
+        fields: ["publicId", "occurredOn", "alarm"],
+        "page-size": pageSize,
+        // Sort by most recent first
+        sort: "-occurredOn",
+      };
+
+      // Add pagination parameters
+      if (pageAfter) {
+        occurrencesParams["page-after"] = pageAfter;
+      }
+
+      // Add search filter if provided
+      if (searchQuery && searchQuery.trim() !== "") {
+        occurrencesParams["filters"] = [
+          `contains(publicId,"${searchQuery.trim()}")`,
+        ];
+      }
+
+      // Fetch just the current page of occurrences
+      const occurrencesResponse = await this.fetchWithCache(
+        occurrencesUrl,
+        occurrencesParams,
+        forceFresh || !!pageAfter // Always fetch fresh data when paginating
+      );
+
+      // Process alarms with their occurrences
+      const processedAlarms: Alarm[] = [];
+      const alarmMap = new Map<string, Alarm>();
+
+      // Create a map of alarms by publicId for quick lookup
+      alarmsResponse.data.forEach((alarm: any) => {
+        alarmMap.set(alarm.publicId, {
+          ...alarm,
+          occurrences: [],
+          agent: null as any,
+          source: null,
+        });
+      });
+
+      // Assign occurrences to their respective alarms
+      const nullAlarmOccurrences: AgentDataAlarmOccurrence[] = [];
+
+      occurrencesResponse.data.forEach(
+        (occurrence: AgentDataAlarmOccurrence) => {
+          if (occurrence.alarm && occurrence.alarm.publicId) {
+            const alarm = alarmMap.get(occurrence.alarm.publicId);
+            if (alarm) {
+              alarm.occurrences.push(occurrence);
+            }
+          } else {
+            nullAlarmOccurrences.push(occurrence);
+          }
+        }
+      );
+
+      // Convert map back to array and filter alarms with occurrences
+      alarmMap.forEach((alarm) => {
+        if (alarm.occurrences.length > 0) {
+          processedAlarms.push(alarm);
+        }
+      });
+
+      // Add occurrences with null alarms if any
+      if (nullAlarmOccurrences.length > 0) {
+        processedAlarms.push({
+          publicId: "null-alarm-occurrences",
+          name: "Unbound Occurrences",
+          severity: "unknown",
+          occurrences: nullAlarmOccurrences,
+          agent: null as any,
+          source: null,
+        });
+      }
 
       return {
-        alarms,
+        alarms: processedAlarms,
         moreAfter: occurrencesResponse.moreAfter,
       };
     } catch (error) {
       console.error("Error in getAlarmsAndOccurrences:", error);
-      // Return empty result to prevent crashing
       return {
         alarms: [],
         moreAfter: undefined,
       };
-    }
-  }
-
-  async recursiveFetch(
-    url: string,
-    fields: string[] = [],
-    filters: string[] = [],
-    items: any[] = [],
-    pageAfter?: string,
-    pageSize: number = 50,
-    singlePage: boolean = false
-  ): Promise<any> {
-    const requestUrl = new URL(url);
-
-    if (pageAfter) {
-      requestUrl.searchParams.set("page-after", pageAfter);
-    }
-
-    // Set page size parameter
-    requestUrl.searchParams.set("page-size", pageSize.toString());
-
-    if (fields.length) {
-      requestUrl.searchParams.set("fields", fields.join(","));
-    }
-
-    if (filters.length) {
-      // for each filter set filters=filter1&filters=filter2
-      filters.forEach((filter) => {
-        requestUrl.searchParams.append("filters", filter);
-      });
-    }
-
-    try {
-      const response = await this.fetch(requestUrl.toString());
-      const newData = items.concat(response.data || []);
-
-      // If singlePage is true, return the current page with pagination info
-      if (singlePage) {
-        return {
-          data: response.data || [],
-          moreAfter: response.moreAfter,
-        };
-      }
-
-      // Otherwise, continue recursive fetching for all pages
-      if (response.moreAfter) {
-        return this.recursiveFetch(
-          url,
-          fields,
-          filters,
-          newData,
-          response.moreAfter,
-          pageSize
-        );
-      }
-
-      return newData;
-    } catch (error) {
-      console.error(`Error in recursiveFetch for ${url}:`, error);
-      // Return empty result to prevent crashing
-      if (singlePage) {
-        return {
-          data: [],
-          moreAfter: undefined,
-        };
-      }
-      return items;
     }
   }
 }

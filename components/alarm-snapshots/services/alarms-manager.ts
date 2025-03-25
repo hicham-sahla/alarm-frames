@@ -1,6 +1,7 @@
 import { ApiService } from "./api.service";
 import type { ComponentContext } from "@ixon-cdk/types";
 import type { Alarm } from "../types";
+import { DateTime } from "luxon";
 
 export class AlarmsManager {
   apiService: ApiService;
@@ -11,11 +12,15 @@ export class AlarmsManager {
     this.apiService = new ApiService(context);
   }
 
+  /**
+   * Get alarm occurrences for an agent with pagination support
+   */
   async getAllAlarmOccurrencesForAgent(
     agentId: string,
     pageSize: number = 50,
     pageAfter?: string,
-    searchQuery?: string
+    searchQuery?: string,
+    forceFresh: boolean = false
   ): Promise<{ alarms: Alarm[]; moreAfter?: string }> {
     console.log(
       "Fetching alarm data and occurrences for agent ID:",
@@ -25,11 +30,72 @@ export class AlarmsManager {
       "and searchQuery:",
       searchQuery
     );
-    return this.apiService.getAlarmsAndOccurrences(
-      agentId,
-      pageSize,
-      pageAfter,
-      searchQuery
-    );
+
+    try {
+      // Get data with pagination
+      const result = await this.apiService.getAlarmsAndOccurrences(
+        agentId,
+        pageSize,
+        pageAfter,
+        searchQuery,
+        forceFresh
+      );
+
+      // Process the alarms for display
+      const processedAlarms = this.processAlarmsForDisplay(result.alarms);
+
+      return {
+        alarms: processedAlarms,
+        moreAfter: result.moreAfter,
+      };
+    } catch (error) {
+      console.error("Error in getAllAlarmOccurrencesForAgent:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process alarms for display - moved from Svelte component
+   */
+  private processAlarmsForDisplay(alarms: Alarm[]): Alarm[] {
+    // Additional processing logic can be moved here
+    // This centralizes the data transformation logic
+    return alarms.map((alarm) => ({
+      ...alarm,
+      // Sort occurrences by date descending (newest first)
+      occurrences: [...alarm.occurrences].sort((a, b) => {
+        const dateA = a.occurredOn ? new Date(a.occurredOn).getTime() : 0;
+        const dateB = b.occurredOn ? new Date(b.occurredOn).getTime() : 0;
+        return dateB - dateA;
+      }),
+    }));
+  }
+
+  /**
+   * Refresh cache and fetch fresh data
+   */
+  refreshData() {
+    this.apiService.clearCache();
+  }
+
+  /**
+   * Format date for display
+   */
+  static formatDate(dateString: string | undefined) {
+    if (!dateString) {
+      return {
+        fullDate: "No Date Provided",
+        dateOnly: "No Date Provided",
+        timeOnly: "No Time Provided",
+        formattedDate: "No Date Provided",
+      };
+    }
+    const dt = DateTime.fromISO(dateString);
+    return {
+      fullDate: dt.toISO(),
+      dateOnly: dt.toFormat("dd-MM-yyyy"),
+      timeOnly: dt.toFormat("HH:mm"),
+      formattedDate: dt.toFormat("dd-MM-yyyy HH:mm"),
+    };
   }
 }

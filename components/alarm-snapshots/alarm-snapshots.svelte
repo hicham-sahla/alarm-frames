@@ -87,7 +87,7 @@
     }
   });
 
-  async function loadInitialData() {
+  async function loadInitialData(forceFresh = false) {
     if (!agentId) return;
 
     loading = true;
@@ -100,24 +100,19 @@
         agentId,
         pageSize,
         undefined,
-        search.trim() !== "" ? search : undefined
+        search.trim() !== "" ? search : undefined,
+        forceFresh // Pass flag to force fresh data when needed
       );
 
-      occurrencesList = result.alarms
-        .flatMap((alarm) =>
-          alarm.occurrences.map((occ) => ({
-            name: alarm.name,
-            occurredOn: formatDate(occ.occurredOn),
-            severity: alarm.severity,
-            publicId: occ.publicId || "Unknown ID",
-          }))
-        )
-        .sort((a, b) => {
-          return (
-            DateTime.fromISO(b.occurredOn.fullDate).toMillis() -
-            DateTime.fromISO(a.occurredOn.fullDate).toMillis()
-          );
-        });
+      // Process occurrences for display
+      occurrencesList = result.alarms.flatMap((alarm) =>
+        alarm.occurrences.map((occ) => ({
+          name: alarm.name,
+          occurredOn: formatDate(occ.occurredOn),
+          severity: alarm.severity,
+          publicId: occ.publicId || "Unknown ID",
+        }))
+      );
 
       currentPageAfter = result.moreAfter;
       hasMoreData = !!result.moreAfter;
@@ -161,21 +156,14 @@
         search.trim() !== "" ? search : undefined
       );
 
-      const newOccurrences = result.alarms
-        .flatMap((alarm) =>
-          alarm.occurrences.map((occ) => ({
-            name: alarm.name,
-            occurredOn: formatDate(occ.occurredOn),
-            severity: alarm.severity,
-            publicId: occ.publicId || "Unknown ID",
-          }))
-        )
-        .sort((a, b) => {
-          return (
-            DateTime.fromISO(b.occurredOn.fullDate).toMillis() -
-            DateTime.fromISO(a.occurredOn.fullDate).toMillis()
-          );
-        });
+      const newOccurrences = result.alarms.flatMap((alarm) =>
+        alarm.occurrences.map((occ) => ({
+          name: alarm.name,
+          occurredOn: formatDate(occ.occurredOn),
+          severity: alarm.severity,
+          publicId: occ.publicId || "Unknown ID",
+        }))
+      );
 
       // Append new occurrences to the existing list
       occurrencesList = [...occurrencesList, ...newOccurrences];
@@ -190,22 +178,7 @@
   }
 
   function formatDate(dateString: string | undefined) {
-    if (!dateString) {
-      // Return a default object where no fields are undefined
-      return {
-        fullDate: "No Date Provided",
-        dateOnly: "No Date Provided",
-        timeOnly: "No Time Provided",
-        formattedDate: "No Date Provided", // Make sure this is not undefined
-      };
-    }
-    const dt = DateTime.fromISO(dateString);
-    return {
-      fullDate: dt.toISO(),
-      dateOnly: dt.toFormat("dd-MM-yyyy"),
-      timeOnly: dt.toFormat("HH:mm"),
-      formattedDate: dt.toFormat("dd-MM-yyyy HH:mm"), // Ensure formattedDate is always defined
-    };
+    return AlarmsManager.formatDate(dateString);
   }
 
   // Handle search focus state
@@ -339,11 +312,11 @@
 
   function toggleRefresh(): void {
     if (agentId) {
-      // Reset pagination and reload data
+      // Reset pagination and reload data with forced refresh
       currentPageAfter = undefined;
       hasMoreData = true;
       occurrencesList = [];
-      loadInitialData();
+      loadInitialData(true); // Pass true to force fresh data
     } else {
       console.error("Agent ID is unavailable.");
     }
