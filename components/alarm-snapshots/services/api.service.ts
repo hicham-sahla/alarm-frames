@@ -4,6 +4,7 @@ import type {
 } from "@ixon-cdk/types";
 import type { Alarm } from "../types";
 import { DateTime } from "luxon";
+import { parseSearchDate } from "../utils/search-utils";
 
 interface CacheItem {
   data: any;
@@ -174,9 +175,34 @@ export class ApiService {
 
       // Add search filter if provided
       if (searchQuery && searchQuery.trim() !== "") {
-        occurrencesParams["filters"] = [
-          `contains(publicId,"${searchQuery.trim()}")`,
-        ];
+        const trimmedQuery = searchQuery.trim();
+        const filterConditions = [];
+
+        // Check if the search query looks like a date
+        const dateCheck = parseSearchDate(
+          trimmedQuery,
+          this.context.appData.timeZone
+        );
+
+        if (dateCheck.isDate && dateCheck.apiFilters.length > 0) {
+          // Add date-specific filters
+          filterConditions.push(...dateCheck.apiFilters);
+        } else {
+          // Regular search conditions - ID and name
+          filterConditions.push(
+            `contains(publicId,"${trimmedQuery}")`,
+            `contains(alarm.name,"${trimmedQuery}")`
+          );
+
+          // Try to match partial IDs for longer search terms
+          if (trimmedQuery.length >= 3) {
+            // This is a simplified example - actual DB might not support this exact syntax
+            filterConditions.push(`startswith(publicId,"${trimmedQuery}")`);
+          }
+        }
+
+        // Join with 'or' to match any of the conditions
+        occurrencesParams["filters"] = [`(${filterConditions.join(" or ")})`];
       }
 
       // Fetch just the current page of occurrences

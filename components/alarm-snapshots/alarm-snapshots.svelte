@@ -8,6 +8,7 @@
   } from "@ixon-cdk/types";
   import type { Alarm } from "./types";
   import { writable } from "svelte/store";
+  import { filterOccurrences } from "./utils/search-utils";
 
   export let context: ComponentContext;
   let alarmsManager: AlarmsManager;
@@ -25,6 +26,7 @@
   };
 
   let occurrencesList: Occurrence[] = [];
+  let filteredOccurrences: Occurrence[] = []; // Add this line to define the variable
   let loading = true;
   let tableWidth = 0;
   let tableScrollTop = 0;
@@ -96,12 +98,14 @@
         "Loading initial data with search:",
         search.trim() !== "" ? search : undefined
       );
+
+      // Make the API call with the search term
       const result = await alarmsManager.getAllAlarmOccurrencesForAgent(
         agentId,
         pageSize,
         undefined,
         search.trim() !== "" ? search : undefined,
-        forceFresh // Pass flag to force fresh data when needed
+        forceFresh
       );
 
       // Process occurrences for display
@@ -116,9 +120,43 @@
 
       currentPageAfter = result.moreAfter;
       hasMoreData = !!result.moreAfter;
-
-      // Store current search to compare later
       previousSearch = search;
+
+      // If we got no results from the API but have a search term,
+      // try fetching all data to apply client-side filtering
+      if (occurrencesList.length === 0 && search.trim() !== "") {
+        console.log("No API results, trying client-side filtering");
+        const backupResult = await alarmsManager.getAllAlarmOccurrencesForAgent(
+          agentId,
+          pageSize,
+          undefined,
+          undefined, // No search filter
+          forceFresh
+        );
+
+        // Process these new occurrences
+        const backupOccurrences = backupResult.alarms.flatMap((alarm) =>
+          alarm.occurrences.map((occ) => ({
+            name: alarm.name,
+            occurredOn: formatDate(occ.occurredOn),
+            severity: alarm.severity,
+            publicId: occ.publicId || "Unknown ID",
+          }))
+        );
+
+        // Apply client-side filtering
+        occurrencesList = filterOccurrences(
+          backupOccurrences,
+          search,
+          context.appData.timeZone
+        );
+
+        // Update pagination info
+        if (occurrencesList.length > 0) {
+          currentPageAfter = backupResult.moreAfter;
+          hasMoreData = !!backupResult.moreAfter;
+        }
+      }
     } catch (error) {
       console.error("Error fetching initial data:", error);
     } finally {
@@ -165,11 +203,51 @@
         }))
       );
 
-      // Append new occurrences to the existing list
-      occurrencesList = [...occurrencesList, ...newOccurrences];
+      // If we got no new occurrences but have a search term, try client-side approach
+      if (newOccurrences.length === 0 && search.trim() !== "") {
+        // Fetch all data for the next page without filtering
+        const backupResult = await alarmsManager.getAllAlarmOccurrencesForAgent(
+          agentId,
+          pageSize,
+          currentPageAfter,
+          undefined // No search filter
+        );
 
-      currentPageAfter = result.moreAfter;
-      hasMoreData = !!result.moreAfter;
+        // Process these new occurrences
+        const backupOccurrences = backupResult.alarms.flatMap((alarm) =>
+          alarm.occurrences.map((occ) => ({
+            name: alarm.name,
+            occurredOn: formatDate(occ.occurredOn),
+            severity: alarm.severity,
+            publicId: occ.publicId || "Unknown ID",
+          }))
+        );
+
+        // Apply client-side filtering
+        const filteredNewOccurrences = filterOccurrences(
+          backupOccurrences,
+          search,
+          context.appData.timeZone
+        );
+
+        if (filteredNewOccurrences.length > 0) {
+          // Append filtered occurrences to the existing list
+          occurrencesList = [...occurrencesList, ...filteredNewOccurrences];
+
+          // Update pagination
+          currentPageAfter = backupResult.moreAfter;
+          hasMoreData = !!backupResult.moreAfter;
+        } else {
+          // No results from client-side filtering either
+          hasMoreData = false;
+        }
+      } else {
+        // Append new occurrences to the existing list
+        occurrencesList = [...occurrencesList, ...newOccurrences];
+
+        currentPageAfter = result.moreAfter;
+        hasMoreData = !!result.moreAfter;
+      }
     } catch (error) {
       console.error("Error fetching more data:", error);
     } finally {
@@ -308,7 +386,18 @@
     }).toISO();
   }
 
-  $: filteredOccurrences = occurrencesList;
+  // Apply client-side filtering whenever search or occurrencesList changes
+  $: {
+    if (search.trim() !== "") {
+      filteredOccurrences = filterOccurrences(
+        occurrencesList,
+        search,
+        context.appData.timeZone
+      );
+    } else {
+      filteredOccurrences = occurrencesList;
+    }
+  }
 
   function toggleRefresh(): void {
     if (agentId) {
