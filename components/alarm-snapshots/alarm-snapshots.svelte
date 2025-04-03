@@ -26,7 +26,7 @@
   };
 
   let occurrencesList: Occurrence[] = [];
-  let filteredOccurrences: Occurrence[] = []; // Add this line to define the variable
+  let filteredOccurrences: Occurrence[] = [];
   let loading = true;
   let tableWidth = 0;
   let tableScrollTop = 0;
@@ -35,6 +35,7 @@
   $: isNarrow = tableWidth < 320;
 
   let agentId: string | null = null;
+  let agentName = "unknown-agent";
   let search = "";
   let previousSearch = "";
   let isSearchFocused = false;
@@ -52,9 +53,20 @@
 
   let isToDate = false; // Default to adjusting 'from'
 
+  // Variables for export dialog
+  let showExportDialog = false;
+  let exportPeriod = "all"; // Options: "all", "current", "custom"
+  let exportStartDate = "";
+  let exportEndDate = "";
+  let exportInProgress = false;
+  let exportProgress = 0;
+  let exportTotalItems = 0;
+  let exportCurrentItems = 0;
+
   function toggleDateAdjustment() {
     adjustmentTarget = isToDate ? "to" : "from";
   }
+
   let minuteAdjustment: number = 15; // Default adjustment period in minutes
   let adjustmentTarget: "from" | "to" = "from"; // Default to adjusting 'from' date
 
@@ -69,17 +81,21 @@
     if (context) {
       const client = context.createResourceDataClient();
       client.query(
-        [{ selector: "Agent", fields: ["publicId"] }],
+        [{ selector: "Agent", fields: ["publicId", "name"] }], // Add name field
         async (results) => {
-          if (
-            results &&
-            results.length > 0 &&
-            results[0].data &&
-            results[0].data.publicId
-          ) {
-            agentId = results[0].data.publicId;
-            if (agentId) {
-              await loadInitialData();
+          if (results && results.length > 0 && results[0].data) {
+            if (results[0].data.publicId) {
+              agentId = results[0].data.publicId;
+              if (agentId) {
+                await loadInitialData();
+              }
+            }
+
+            // Store agent name for later use
+            if (results[0].data.name) {
+              agentName = results[0].data.name
+                .replace(/\s+/g, "-")
+                .toLowerCase();
             }
           }
         }
@@ -118,6 +134,19 @@
         }))
       );
 
+      // Sort by date descending (newest first)
+      occurrencesList.sort((a, b) => {
+        const dateA =
+          a.occurredOn && a.occurredOn.fullDate
+            ? new Date(a.occurredOn.fullDate).getTime()
+            : 0;
+        const dateB =
+          b.occurredOn && b.occurredOn.fullDate
+            ? new Date(b.occurredOn.fullDate).getTime()
+            : 0;
+        return dateB - dateA; // Descending order (newest first)
+      });
+
       currentPageAfter = result.moreAfter;
       hasMoreData = !!result.moreAfter;
       previousSearch = search;
@@ -143,6 +172,19 @@
             publicId: occ.publicId || "Unknown ID",
           }))
         );
+
+        // Sort by date descending (newest first)
+        backupOccurrences.sort((a, b) => {
+          const dateA =
+            a.occurredOn && a.occurredOn.fullDate
+              ? new Date(a.occurredOn.fullDate).getTime()
+              : 0;
+          const dateB =
+            b.occurredOn && b.occurredOn.fullDate
+              ? new Date(b.occurredOn.fullDate).getTime()
+              : 0;
+          return dateB - dateA; // Descending order (newest first)
+        });
 
         // Apply client-side filtering
         occurrencesList = filterOccurrences(
@@ -203,6 +245,19 @@
         }))
       );
 
+      // Sort new occurrences by date (newest first)
+      newOccurrences.sort((a, b) => {
+        const dateA =
+          a.occurredOn && a.occurredOn.fullDate
+            ? new Date(a.occurredOn.fullDate).getTime()
+            : 0;
+        const dateB =
+          b.occurredOn && b.occurredOn.fullDate
+            ? new Date(b.occurredOn.fullDate).getTime()
+            : 0;
+        return dateB - dateA; // Descending order
+      });
+
       // If we got no new occurrences but have a search term, try client-side approach
       if (newOccurrences.length === 0 && search.trim() !== "") {
         // Fetch all data for the next page without filtering
@@ -222,6 +277,19 @@
             publicId: occ.publicId || "Unknown ID",
           }))
         );
+
+        // Sort backup occurrences as well
+        backupOccurrences.sort((a, b) => {
+          const dateA =
+            a.occurredOn && a.occurredOn.fullDate
+              ? new Date(a.occurredOn.fullDate).getTime()
+              : 0;
+          const dateB =
+            b.occurredOn && b.occurredOn.fullDate
+              ? new Date(b.occurredOn.fullDate).getTime()
+              : 0;
+          return dateB - dateA; // Descending order
+        });
 
         // Apply client-side filtering
         const filteredNewOccurrences = filterOccurrences(
@@ -453,12 +521,448 @@
     to = "";
   }
 
+  // Show export options dialog
+  function showExportOptions(): void {
+    // Initialize default values for export options
+    exportPeriod = "all";
+
+    // Set default date range to the current time range in context
+    if (context && context.timeRange) {
+      const fromDate = DateTime.fromMillis(context.timeRange.from, {
+        zone: context.appData.timeZone,
+      });
+      const toDate = DateTime.fromMillis(context.timeRange.to, {
+        zone: context.appData.timeZone,
+      });
+
+      // Format with HTML datetime-local input format (required by browser)
+      exportStartDate = fromDate.toFormat("yyyy-MM-dd'T'HH:mm");
+      exportEndDate = toDate.toFormat("yyyy-MM-dd'T'HH:mm");
+    } else {
+      // Fallback to current day if no context time range
+      const now = DateTime.now().setZone(context.appData.timeZone);
+      exportStartDate = now.startOf("day").toFormat("yyyy-MM-dd'T'HH:mm");
+      exportEndDate = now.endOf("day").toFormat("yyyy-MM-dd'T'HH:mm");
+    }
+
+    // Show dialog
+    showExportDialog = true;
+  }
+
+  // Format a date from ISO to display format (dd/MM/yyyy)
+  function formatDateForDisplay(isoDate: string): string {
+    const dt = DateTime.fromISO(isoDate);
+    return dt.isValid ? dt.toFormat("dd/MM/yyyy HH:mm") : "Invalid date";
+  }
+
+  // Function to close export dialog
+  function closeExportDialog(): void {
+    showExportDialog = false;
+    exportInProgress = false;
+  }
+
+  // Helper function to process occurrences into CSV format
+  function processOccurrencesToCSV(occurrences: Occurrence[]): string[][] {
+    return occurrences.map((occurrence) => [
+      occurrence.publicId,
+      occurrence.name,
+      formatDateForTable(occurrence.occurredOn.fullDate),
+      occurrence.severity,
+    ]);
+  }
+
+  // Function to export all occurrences from agent
+  async function exportAllOccurrences(): Promise<Occurrence[]> {
+    if (!agentId) {
+      throw new Error("Agent ID is not available");
+    }
+
+    let allOccurrences: Occurrence[] = [];
+    let hasMore = true;
+    let pageAfter: string | undefined = undefined;
+    const batchSize = 100; // Use larger batch size for export
+
+    exportTotalItems = 1000; // Initial estimate, will be updated
+    exportCurrentItems = 0;
+
+    while (hasMore) {
+      try {
+        // Get a batch of occurrences
+        const result = await alarmsManager.getAllAlarmOccurrencesForAgent(
+          agentId,
+          batchSize,
+          pageAfter,
+          undefined, // No search filter for complete export
+          false // Don't force fresh data for each page
+        );
+
+        // Process occurrences
+        const newOccurrences = result.alarms.flatMap((alarm) =>
+          alarm.occurrences.map((occ) => ({
+            name: alarm.name,
+            occurredOn: formatDate(occ.occurredOn),
+            severity: alarm.severity,
+            publicId: occ.publicId || "Unknown ID",
+          }))
+        );
+
+        // Add to collection
+        allOccurrences = [...allOccurrences, ...newOccurrences];
+
+        // Update progress
+        exportCurrentItems = allOccurrences.length;
+        if (result.moreAfter) {
+          // If we know there's more, update the total estimate
+          exportTotalItems = Math.max(
+            exportTotalItems,
+            allOccurrences.length + batchSize
+          );
+        } else {
+          // If this is the last page, set the total to the actual count
+          exportTotalItems = allOccurrences.length;
+        }
+
+        exportProgress = Math.round(
+          (exportCurrentItems / exportTotalItems) * 100
+        );
+
+        // Check if we need to fetch more
+        pageAfter = result.moreAfter;
+        hasMore = !!result.moreAfter;
+      } catch (error) {
+        console.error("Error fetching occurrences for export:", error);
+        throw error;
+      }
+    }
+
+    // Sort all occurrences by date descending (newest first)
+    return allOccurrences.sort((a, b) => {
+      const dateA =
+        a.occurredOn && a.occurredOn.fullDate
+          ? new Date(a.occurredOn.fullDate).getTime()
+          : 0;
+      const dateB =
+        b.occurredOn && b.occurredOn.fullDate
+          ? new Date(b.occurredOn.fullDate).getTime()
+          : 0;
+      return dateB - dateA; // Descending order (newest first)
+    });
+  }
+
+  // Function to export occurrences within a date range
+  async function exportOccurrencesInDateRange(
+    startDate: string,
+    endDate: string
+  ): Promise<Occurrence[]> {
+    if (!agentId) {
+      throw new Error("Agent ID is not available");
+    }
+
+    // Parse the input dates
+    const start = DateTime.fromISO(startDate);
+    const end = DateTime.fromISO(endDate);
+
+    if (!start.isValid || !end.isValid) {
+      throw new Error("Invalid date format");
+    }
+
+    console.log(
+      `Exporting occurrences between ${start.toISO()} and ${end.toISO()}`
+    );
+
+    // We'll use client-side filtering, but first get all data in the general time period
+    let allOccurrences: Occurrence[] = [];
+    let hasMore = true;
+    let pageAfter: string | undefined = undefined;
+    const batchSize = 100;
+
+    exportTotalItems = 500; // Initial estimate, will be updated
+    exportCurrentItems = 0;
+
+    while (hasMore) {
+      try {
+        // Get a batch of occurrences without date filtering
+        // The API may not reliably handle complex date filters, so we'll filter client-side
+        const result = await alarmsManager.getAllAlarmOccurrencesForAgent(
+          agentId,
+          batchSize,
+          pageAfter,
+          undefined, // No search filter - we'll filter client-side
+          false
+        );
+
+        // Process occurrences
+        const newOccurrences = result.alarms.flatMap((alarm) =>
+          alarm.occurrences.map((occ) => ({
+            name: alarm.name,
+            occurredOn: formatDate(occ.occurredOn),
+            severity: alarm.severity,
+            publicId: occ.publicId || "Unknown ID",
+          }))
+        );
+
+        // Add to collection
+        allOccurrences = [...allOccurrences, ...newOccurrences];
+
+        // Update progress
+        exportCurrentItems = allOccurrences.length;
+        if (result.moreAfter) {
+          exportTotalItems = Math.max(
+            exportTotalItems,
+            allOccurrences.length + batchSize
+          );
+        } else {
+          exportTotalItems = allOccurrences.length;
+        }
+
+        exportProgress = Math.round(
+          (exportCurrentItems / exportTotalItems) * 100
+        );
+
+        // Check if we need to fetch more
+        pageAfter = result.moreAfter;
+        hasMore = !!result.moreAfter && allOccurrences.length < 1000; // Limit to 1000 records for performance
+      } catch (error) {
+        console.error(
+          "Error fetching occurrences for date range export:",
+          error
+        );
+        throw error;
+      }
+    }
+
+    // Apply client-side date filtering
+    const filteredOccurrences = allOccurrences.filter((occurrence) => {
+      if (!occurrence.occurredOn || !occurrence.occurredOn.fullDate)
+        return false;
+
+      const occurrenceDate = DateTime.fromISO(occurrence.occurredOn.fullDate);
+      if (!occurrenceDate.isValid) return false;
+
+      return occurrenceDate >= start && occurrenceDate <= end;
+    });
+
+    console.log(
+      `Found ${filteredOccurrences.length} occurrences in date range out of ${allOccurrences.length} total`
+    );
+
+    // Sort by date descending (newest first)
+    return filteredOccurrences.sort((a, b) => {
+      const dateA =
+        a.occurredOn && a.occurredOn.fullDate
+          ? new Date(a.occurredOn.fullDate).getTime()
+          : 0;
+      const dateB =
+        b.occurredOn && b.occurredOn.fullDate
+          ? new Date(b.occurredOn.fullDate).getTime()
+          : 0;
+      return dateB - dateA; // Descending order (newest first)
+    });
+  }
+
+  // Function to execute the export based on selected options
+  async function executeExport(): Promise<void> {
+    try {
+      exportInProgress = true;
+      exportProgress = 0;
+
+      let occurrencesToExport: Occurrence[] = [];
+
+      // Get occurrences based on selected period
+      if (exportPeriod === "all") {
+        // Export all occurrences
+        occurrencesToExport = await exportAllOccurrences();
+
+        // Sort by date descending (newest first)
+        occurrencesToExport.sort((a, b) => {
+          const dateA =
+            a.occurredOn && a.occurredOn.fullDate
+              ? new Date(a.occurredOn.fullDate).getTime()
+              : 0;
+          const dateB =
+            b.occurredOn && b.occurredOn.fullDate
+              ? new Date(b.occurredOn.fullDate).getTime()
+              : 0;
+          return dateB - dateA; // Descending order (newest first)
+        });
+      } else if (exportPeriod === "current") {
+        // Export current filtered occurrences - already sorted in the UI
+        occurrencesToExport = [...filteredOccurrences];
+        exportProgress = 100; // No need for progress calculation
+      } else if (exportPeriod === "custom") {
+        // Format dates correctly from the date picker
+        try {
+          // Export occurrences in custom date range
+          // The date inputs might need conversion from local format
+          occurrencesToExport = await exportOccurrencesInDateRange(
+            exportStartDate,
+            exportEndDate
+          );
+        } catch (error) {
+          console.error("Date conversion error:", error);
+          alert(
+            "Invalid date format. Please ensure both start and end dates are properly set."
+          );
+          exportInProgress = false;
+          return;
+        }
+      }
+
+      // Check if we have data to export
+      if (occurrencesToExport.length === 0) {
+        alert(
+          "No occurrences found for the selected criteria. Try expanding your date range or selecting 'Export all occurrences'."
+        );
+        exportInProgress = false;
+        return;
+      }
+
+      // Create CSV header row
+      const headers = ["ID", "Alarm", "Date", "Severity"];
+
+      // Process occurrences to CSV format
+      const csvData = processOccurrencesToCSV(occurrencesToExport);
+
+      // Add header row
+      csvData.unshift(headers);
+
+      // Convert to CSV string with proper escaping
+      const csvContent = csvData
+        .map((row) =>
+          row
+            .map((cell) =>
+              typeof cell === "string" &&
+              (cell.includes(",") || cell.includes('"'))
+                ? `"${cell.replace(/"/g, '""')}"`
+                : cell
+            )
+            .join(",")
+        )
+        .join("\n");
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+
+      // // Get agent name from context
+      // try {
+      //   if (context && context.agent && context.agent.name) {
+      //     agentName = context.agent.name.replace(/\s+/g, "-").toLowerCase();
+      //   }
+      // } catch (error) {
+      //   console.warn(
+      //     "Could not get agent name from context, using default",
+      //     error
+      //   );
+      // }
+
+      let filename = `${agentName}_alarm_occurrences_`;
+
+      if (exportPeriod === "custom") {
+        // Add custom date range to filename
+        const startFormatted =
+          DateTime.fromISO(exportStartDate).toFormat("dd-MM-yyyy");
+        const endFormatted =
+          DateTime.fromISO(exportEndDate).toFormat("dd-MM-yyyy");
+        filename += `custom_${startFormatted}_to_${endFormatted}`;
+      } else if (exportPeriod === "current") {
+        // Add filtered tag with current timestamp
+        filename += `filtered_${DateTime.now().toFormat("dd-MM-yyyy_HHmm")}`;
+      } else {
+        // For all occurrences, add from-to date of the entire dataset
+        // Get earliest and latest dates from the data
+        const sortedByDate = [...occurrencesToExport].sort((a, b) => {
+          const dateA =
+            a.occurredOn && a.occurredOn.fullDate
+              ? new Date(a.occurredOn.fullDate).getTime()
+              : 0;
+          const dateB =
+            b.occurredOn && b.occurredOn.fullDate
+              ? new Date(b.occurredOn.fullDate).getTime()
+              : 0;
+          return dateA - dateB; // Ascending order for earliest/latest
+        });
+
+        const earliest =
+          sortedByDate.length > 0 &&
+          sortedByDate[0].occurredOn &&
+          sortedByDate[0].occurredOn.fullDate
+            ? DateTime.fromISO(sortedByDate[0].occurredOn.fullDate).toFormat(
+                "dd-MM-yyyy"
+              )
+            : "unknown";
+
+        const latest =
+          sortedByDate.length > 0 &&
+          sortedByDate[sortedByDate.length - 1].occurredOn &&
+          sortedByDate[sortedByDate.length - 1].occurredOn.fullDate
+            ? DateTime.fromISO(
+                sortedByDate[sortedByDate.length - 1].occurredOn.fullDate
+              ).toFormat("dd-MM-yyyy")
+            : "unknown";
+
+        filename += `${earliest}_to_${latest}`;
+      }
+
+      filename += ".csv";
+
+      // Create download link
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+
+      link.setAttribute("href", url);
+      link.setAttribute("download", filename);
+      link.style.visibility = "hidden";
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      URL.revokeObjectURL(url);
+
+      console.log(
+        `CSV exported successfully: ${filename} with ${occurrencesToExport.length} records`
+      );
+
+      // Close dialog after successful export
+      setTimeout(() => {
+        closeExportDialog();
+      }, 1000); // Keep dialog open briefly to show 100% completion
+    } catch (error) {
+      console.error("Error during export:", error);
+      alert(
+        "An error occurred while exporting: " +
+          (error instanceof Error ? error.message : "Unknown error")
+      );
+      exportInProgress = false;
+    }
+  }
+
+  // Main export function that delegates to the appropriate export method
+  async function exportToCSV(): Promise<void> {
+    if (!agentId) {
+      alert("Cannot export: Agent ID is not available");
+      return;
+    }
+
+    // Show export dialog to let user choose options
+    showExportOptions();
+  }
+
+  function formatDateForTable(dateString: string | undefined): string {
+    if (!dateString) {
+      return "No Date Provided"; // Fallback in case the date is undefined
+    }
+    const dt = DateTime.fromISO(dateString);
+    return dt.toFormat("dd/MM/yyyy, HH:mm"); // Format matching the date picker with dd/MM/yyyy format
+  }
+
   // Tooltip elements
   let refreshButtonEl: HTMLButtonElement;
   let resetButtonEl: HTMLButtonElement;
   let incrementTimeRangeButtonEl: HTMLButtonElement;
   let decrementTimeRangeButtonEl: HTMLButtonElement;
   let fromDateInputSwitchEl: HTMLLabelElement;
+  let exportCsvButtonEl: HTMLButtonElement;
 
   afterUpdate(() => {
     if (refreshButtonEl) {
@@ -489,6 +993,11 @@
         }
       );
     }
+    if (exportCsvButtonEl) {
+      context.createTooltip(exportCsvButtonEl, {
+        message: "Export alarm occurrences to CSV file",
+      });
+    }
     // Add tooltips for copy buttons
     document.querySelectorAll(".copy-button").forEach((button) => {
       context.createTooltip(button as HTMLElement, {
@@ -496,14 +1005,6 @@
       });
     });
   });
-
-  function formatDateForTable(dateString: string | undefined): string {
-    if (!dateString) {
-      return "No Date Provided"; // Fallback in case the date is undefined
-    }
-    const dt = DateTime.fromISO(dateString);
-    return dt.toFormat("M/d/yyyy, h:mm a"); // Format matching the date picker
-  }
 </script>
 
 <div class="card">
@@ -641,6 +1142,23 @@
               /></svg
             >
           </button>
+          <button
+            class="refresh ripple export-csv"
+            on:click={exportToCSV}
+            aria-label="Download CSV"
+            bind:this={exportCsvButtonEl}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="24px"
+              viewBox="0 -960 960 960"
+              width="24px"
+              fill="#000000"
+              ><path
+                d="M230-360h120v-60H250v-120h100v-60H230q-17 0-28.5 11.5T190-560v160q0 17 11.5 28.5T230-360Zm156 0h120q17 0 28.5-11.5T546-400v-60q0-17-11.5-31.5T506-506h-60v-34h100v-60H426q-17 0-28.5 11.5T386-560v60q0 17 11.5 30.5T426-456h60v36H386v60Zm264 0h60l70-240h-60l-40 138-40-138h-60l70 240ZM160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm0-80h640v-480H160v480Zm0 0v-480 480Z"
+              /></svg
+            >
+          </button>
         </div>
       </div>
     </div>
@@ -751,6 +1269,112 @@
   {/if}
 </div>
 
+<!-- Export Dialog -->
+{#if showExportDialog}
+  <div class="dialog-overlay">
+    <div class="export-dialog">
+      <div class="dialog-header">
+        <h3>Export Alarm Occurrences</h3>
+        <button class="close-button" on:click={closeExportDialog}>×</button>
+      </div>
+
+      <div class="dialog-content">
+        {#if exportInProgress}
+          <div class="export-progress">
+            <p>Retrieving data for export...</p>
+            <div class="progress-bar-container">
+              <div class="progress-bar" style="width: {exportProgress}%"></div>
+            </div>
+            <p>
+              {exportCurrentItems} items processed{#if exportTotalItems > 0}
+                of approximately {exportTotalItems}{/if}
+            </p>
+          </div>
+        {:else}
+          <div class="export-options">
+            <div class="option">
+              <input
+                type="radio"
+                id="export-all"
+                name="exportPeriod"
+                value="all"
+                bind:group={exportPeriod}
+              />
+              <label for="export-all"
+                >Export all occurrences from this unit</label
+              >
+            </div>
+
+            <div class="option">
+              <input
+                type="radio"
+                id="export-current"
+                name="exportPeriod"
+                value="current"
+                bind:group={exportPeriod}
+              />
+              <label for="export-current"
+                >Export currently filtered occurrences ({filteredOccurrences.length}
+                items)</label
+              >
+            </div>
+
+            <div class="option">
+              <input
+                type="radio"
+                id="export-custom"
+                name="exportPeriod"
+                value="custom"
+                bind:group={exportPeriod}
+              />
+              <label for="export-custom"
+                >Export occurrences in custom time range</label
+              >
+            </div>
+
+            {#if exportPeriod === "custom"}
+              <div class="date-range-inputs">
+                <div class="date-field">
+                  <label for="export-start-date">Start Date (dd/mm/yyyy)</label>
+                  <input
+                    type="datetime-local"
+                    id="export-start-date"
+                    bind:value={exportStartDate}
+                  />
+                  <div class="date-display">
+                    {formatDateForDisplay(exportStartDate)}
+                  </div>
+                </div>
+
+                <div class="date-field">
+                  <label for="export-end-date">End Date (dd/mm/yyyy)</label>
+                  <input
+                    type="datetime-local"
+                    id="export-end-date"
+                    bind:value={exportEndDate}
+                  />
+                  <div class="date-display">
+                    {formatDateForDisplay(exportEndDate)}
+                  </div>
+                </div>
+              </div>
+            {/if}
+          </div>
+
+          <div class="actions">
+            <button class="cancel-button" on:click={closeExportDialog}
+              >Cancel</button
+            >
+            <button class="export-button" on:click={executeExport}
+              >Export CSV</button
+            >
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style lang="scss">
   @import "./styles/card";
   @import "./styles/spinner";
@@ -758,4 +1382,5 @@
   @import "./styles/refresh";
   @import "./styles/ripple";
   @import "./styles/search-input";
+  @import "./styles/dialog-export";
 </style>

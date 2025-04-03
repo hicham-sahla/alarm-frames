@@ -1,0 +1,156 @@
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.export-dialog {
+  background-color: var(--basic, white);
+  border-radius: 4px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  width: 500px;
+  max-width: 90%;
+  max-height: 90vh;
+  overflow: auto;
+  font-family: var(--font-family, Roboto, sans-serif);
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid var(--card-border-color, #e0e0e0);
+
+  h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 500;
+  }
+
+  .close-button {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: var(--text-color, #555);
+
+    &:hover {
+      color: var(--primary, #000);
+    }
+  }
+}
+
+.dialog-content {
+  padding: 16px;
+}
+
+.export-options {
+  .option {
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+
+    input[type="radio"] {
+      margin-right: 8px;
+    }
+
+    label {
+      cursor: pointer;
+    }
+  }
+
+  .date-range-inputs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-left: 24px;
+    margin-bottom: 16px;
+
+    .date-field {
+      flex: 1;
+      min-width: 200px;
+
+      label {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 14px;
+      }
+
+      input {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid var(--card-border-color, #ccc);
+        border-radius: 4px;
+      }
+
+      .date-display {
+        margin-top: 4px;
+        font-size: 13px;
+        color: var(--text-color-secondary, #666);
+        font-style: italic;
+      }
+    }
+  }
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
+
+  button {
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+
+    &.cancel-button {
+      background-color: transparent;
+      border: 1px solid var(--card-border-color, #ccc);
+      color: var(--text-color, #333);
+
+      &:hover {
+        background-color: rgba(0, 0, 0, 0.05);
+      }
+    }
+
+    &.export-button {
+      background-color: var(--primary, #1976d2);
+      border: none;
+      color: white;
+
+      &:hover {
+        background-color: var(--primary-dark, #1565c0);
+      }
+    }
+  }
+}
+
+.export-progress {
+  text-align: center;
+
+  .progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background-color: var(--card-border-color, #e0e0e0);
+    border-radius: 4px;
+    margin: 16px 0;
+    overflow: hidden;
+  }
+
+  .progress-bar {
+    height: 100%;
+    background-color: var(--primary, #1976d2);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+  }
+}
