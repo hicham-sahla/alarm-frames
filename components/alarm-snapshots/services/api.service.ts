@@ -314,13 +314,18 @@ export class ApiService {
           if (dateCheck.isDate && dateCheck.apiFilters.length > 0) {
             filterConditions.push(...dateCheck.apiFilters);
           } else {
+            // First check for ID - try exact matches and prefixes
             filterConditions.push(
               `contains(publicId,"${trimmedQueryOriginalCase}")`,
-              `contains(alarm.name,"${trimmedQueryOriginalCase}")`
+              `contains(alarm.name,"${trimmedQueryOriginalCase}")`,
+              `contains(alarm.severity,"${trimmedQueryOriginalCase}")`
             );
-            if (trimmedQueryOriginalCase.length >= 3) {
+
+            if (trimmedQueryOriginalCase.length >= 2) {
               filterConditions.push(
-                `startswith(publicId,"${trimmedQueryOriginalCase}")`
+                `startswith(publicId,"${trimmedQueryOriginalCase}")`,
+                // Add contains for segments of IDs
+                `contains(publicId,"-${trimmedQueryOriginalCase}")`
               );
             }
           }

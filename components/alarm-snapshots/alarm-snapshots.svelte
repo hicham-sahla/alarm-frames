@@ -853,10 +853,7 @@
         </div>
       {:else if filteredOccurrences.length === 0 && !loading}
         <div class="no-occurrences-message">
-          <p>
-            {translations?.NO_OCCURRENCES_FOUND ||
-              "No occurrences found for the selected criteria."}
-          </p>
+          <p>No occurrences found for the searched criteria</p>
           <p>Please try adjusting your search or refresh the data.</p>
         </div>
       {:else}
