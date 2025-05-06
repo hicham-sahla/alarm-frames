@@ -28,7 +28,9 @@ export class AlarmsManager {
       "with pageAfter:",
       pageAfter,
       "and searchQuery:",
-      searchQuery
+      searchQuery,
+      "forceFresh:",
+      forceFresh
     );
 
     try {
@@ -79,9 +81,9 @@ export class AlarmsManager {
   }
 
   /**
-   * Format date for display
+   * Format date for display with proper time zone handling
    */
-  static formatDate(dateString: string | undefined) {
+  static formatDate(dateString: string | undefined, timeZone?: string) {
     if (!dateString) {
       return {
         fullDate: "No Date Provided",
@@ -90,7 +92,22 @@ export class AlarmsManager {
         formattedDate: "No Date Provided",
       };
     }
-    const dt = DateTime.fromISO(dateString);
+
+    // Use the provided time zone or UTC as fallback
+    const dt = DateTime.fromISO(dateString, {
+      zone: timeZone || "UTC",
+    });
+
+    if (!dt.isValid) {
+      console.warn(`Invalid date format: ${dateString}`);
+      return {
+        fullDate: dateString,
+        dateOnly: "Invalid Date",
+        timeOnly: "Invalid Time",
+        formattedDate: "Invalid Date/Time",
+      };
+    }
+
     return {
       fullDate: dt.toISO(),
       dateOnly: dt.toFormat("dd-MM-yyyy"),

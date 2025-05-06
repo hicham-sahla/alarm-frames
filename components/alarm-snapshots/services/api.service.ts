@@ -83,6 +83,7 @@ export class ApiService {
       const response = await fetch(requestUrl.toString(), {
         method: "GET",
         headers: this.headers,
+        cache: forceFresh ? "no-cache" : "default",
       });
 
       if (!response.ok) {
@@ -121,8 +122,6 @@ export class ApiService {
   /**
    * Get alarms and occurrences with optimized pagination
    */
-  // Update in api.service.ts: Enhance the getAlarmsAndOccurrences method to handle date range filters
-
   async getAlarmsAndOccurrences(
     agentId: string,
     pageSize: number = 50,
@@ -135,6 +134,7 @@ export class ApiService {
       pageSize,
       pageAfter,
       searchQuery,
+      forceFresh,
     });
 
     try {
@@ -162,19 +162,24 @@ export class ApiService {
         { agentId }
       );
 
-      // Build optimized parameters
       const occurrencesParams: Record<string, any> = {
         fields: ["publicId", "occurredOn", "alarm"],
         "page-size": pageSize,
-        // Sort by most recent first
+        // IXON uses this syntax for sorting - ensure newest first
         sort: "-occurredOn",
+        // Force no-cache for occurrences to always get the latest data
+        "cache-control": "no-cache",
+        // Do not add custom filters that might break the API
       };
 
       // Add pagination parameters
       if (pageAfter) {
         occurrencesParams["page-after"] = pageAfter;
       }
-
+      if (forceFresh) {
+        // When force refreshing, clear all cache first
+        this.clearCache();
+      }
       // Add search filter if provided
       if (searchQuery && searchQuery.trim() !== "") {
         const trimmedQuery = searchQuery.trim();
@@ -217,11 +222,11 @@ export class ApiService {
         }
       }
 
-      // Fetch just the current page of occurrences
+      // Always force fresh data for occurrences when specifically requested
       const occurrencesResponse = await this.fetchWithCache(
         occurrencesUrl,
         occurrencesParams,
-        forceFresh || !!pageAfter // Always fetch fresh data when paginating
+        forceFresh || !!pageAfter // Always fetch fresh data when paginating or force refresh is requested
       );
 
       // Process alarms with their occurrences

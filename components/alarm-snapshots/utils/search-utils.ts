@@ -36,7 +36,7 @@ export function parseSearchDate(
 } {
   const result = {
     isDate: false,
-    dateObj: null, // Remove the explicit type cast
+    dateObj: null,
     apiFilters: [] as string[],
   };
 
@@ -93,7 +93,7 @@ export function parseSearchDate(
   return result;
 }
 
-// Client-side occurrence filtering
+// Client-side occurrence filtering with proper time zone handling
 export function filterOccurrences(
   occurrences: Occurrence[],
   searchQuery: string,
@@ -118,10 +118,17 @@ export function filterOccurrences(
 
     // Date matching - if the search looks like a date
     if (dateCheck.isDate && dateCheck.dateObj) {
-      // Convert occurrence date to DateTime
+      // Convert occurrence date to DateTime with proper time zone
       const occDate = DateTime.fromISO(occurrence.occurredOn.fullDate, {
         zone: timeZone,
       });
+
+      if (!occDate.isValid) {
+        console.warn(
+          `Invalid date encountered: ${occurrence.occurredOn.fullDate}`
+        );
+        return false;
+      }
 
       // Match whole day if only date was specified
       if (!trimmedQuery.includes(":")) {

@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount, afterUpdate } from "svelte";
+  import { onMount, afterUpdate, onDestroy } from "svelte";
   import { DateTime } from "luxon";
+  import type { DateTime as DateTimeType } from "luxon";
   import { AlarmsManager } from "./services/alarms-manager";
   import type {
     ComponentContext,
@@ -24,7 +25,7 @@
     severity: string;
     publicId: string;
   };
-
+  let allOccs: any[] = [];
   let occurrencesList: Occurrence[] = [];
   let filteredOccurrences: Occurrence[] = [];
   let loading = true;
@@ -43,6 +44,9 @@
 
   let from = "";
   let to = "";
+  // Last refresh timestamp
+  let lastRefreshTime: any | null = null;
+  const AUTO_REFRESH_INTERVAL = 60000; // 1 minute
 
   // Pagination variables
   let pageSize = 50;
@@ -98,13 +102,46 @@
                 .toLowerCase();
             }
           }
+          startAutoRefresh();
         }
       );
     } else {
       console.error("Context is not initialized.");
     }
   });
+  onDestroy(() => {
+    stopAutoRefresh();
+  });
 
+  function startAutoRefresh() {
+    stopAutoRefresh(); // Clear any existing interval
+    doAutoRefresh = true;
+
+    autoRefreshInterval = window.setInterval(() => {
+      if (doAutoRefresh && agentId) {
+        console.log("Auto-refreshing alarm occurrences data...");
+        refreshData();
+      }
+    }, AUTO_REFRESH_INTERVAL);
+  }
+
+  function stopAutoRefresh() {
+    if (autoRefreshInterval) {
+      clearInterval(autoRefreshInterval);
+      autoRefreshInterval = undefined;
+    }
+    doAutoRefresh = false;
+  }
+
+  function refreshData() {
+    if (agentId) {
+      // Reset pagination and reload data with forced refresh
+      currentPageAfter = undefined;
+      hasMoreData = true;
+      occurrencesList = [];
+      loadInitialData(true); // Pass true to force fresh data
+    }
+  }
   async function loadInitialData(forceFresh = false) {
     if (!agentId) return;
 
@@ -136,21 +173,26 @@
 
       // Sort by date descending (newest first)
       occurrencesList.sort((a, b) => {
-        const dateA =
-          a.occurredOn && a.occurredOn.fullDate
-            ? new Date(a.occurredOn.fullDate).getTime()
-            : 0;
-        const dateB =
-          b.occurredOn && b.occurredOn.fullDate
-            ? new Date(b.occurredOn.fullDate).getTime()
-            : 0;
-        return dateB - dateA; // Descending order (newest first)
+        if (!a.occurredOn?.fullDate || !b.occurredOn?.fullDate) return 0;
+
+        // Parse dates with the correct time zone
+        const dateA = DateTime.fromISO(a.occurredOn.fullDate, {
+          zone: context.appData.timeZone,
+        });
+        const dateB = DateTime.fromISO(b.occurredOn.fullDate, {
+          zone: context.appData.timeZone,
+        });
+
+        if (!dateA.isValid || !dateB.isValid) return 0;
+
+        // Compare using Luxon's built-in comparison
+        return dateB.toMillis() - dateA.toMillis(); // Descending order (newest first)
       });
 
       currentPageAfter = result.moreAfter;
       hasMoreData = !!result.moreAfter;
       previousSearch = search;
-
+      lastRefreshTime = DateTime.now().setZone(context.appData.timeZone);
       // If we got no results from the API but have a search term,
       // try fetching all data to apply client-side filtering
       if (occurrencesList.length === 0 && search.trim() !== "") {
@@ -324,7 +366,7 @@
   }
 
   function formatDate(dateString: string | undefined) {
-    return AlarmsManager.formatDate(dateString);
+    return AlarmsManager.formatDate(dateString, context.appData.timeZone);
   }
 
   // Handle search focus state
@@ -494,6 +536,20 @@
     } catch (err) {
       console.error("Failed to copy:", err);
       copySuccess[id] = false;
+    }
+  }
+
+  // Get human-readable time since last refresh
+  function getLastRefreshText(): string {
+    if (!lastRefreshTime) return "Never refreshed";
+
+    const now = DateTime.now().setZone(context.appData.timeZone);
+    const diff = now.diff(lastRefreshTime, ["minutes", "seconds"]);
+
+    if (diff.minutes > 0) {
+      return `Refreshed ${diff.minutes}m ago`;
+    } else {
+      return `Refreshed ${Math.floor(diff.seconds)}s ago`;
     }
   }
 
@@ -955,7 +1011,78 @@
     const dt = DateTime.fromISO(dateString);
     return dt.toFormat("dd/MM/yyyy, HH:mm"); // Format matching the date picker with dd/MM/yyyy format
   }
+  // Add this function to your component
+  async function debugFetchAllOccurrences() {
+    if (!agentId) return;
 
+    console.log("DEBUG: Fetching all occurrences...");
+
+    interface DebugOccurrence {
+      id: string;
+      name: string;
+      date: string;
+      formattedDate: string;
+      severity: string;
+    }
+
+    let allOccs: DebugOccurrence[] = [];
+    let hasMore = true;
+    let pageAfter: string | undefined;
+
+    while (hasMore) {
+      const result = await alarmsManager.getAllAlarmOccurrencesForAgent(
+        agentId,
+        100,
+        pageAfter,
+        undefined,
+        true // Force fresh data
+      );
+
+      const occs: DebugOccurrence[] = result.alarms.flatMap((alarm) =>
+        alarm.occurrences.map((occ) => {
+          const parsed = formatDate(occ.occurredOn);
+          return {
+            id: occ.publicId || "Unknown ID",
+            name: alarm.name,
+            date: occ.occurredOn || "",
+            formattedDate: parsed.formattedDate,
+            severity: alarm.severity,
+          };
+        })
+      );
+
+      allOccs = [...allOccs, ...occs];
+      console.log(`Fetched batch of ${occs.length} occurrences`);
+
+      pageAfter = result.moreAfter;
+      hasMore = !!pageAfter;
+    }
+
+    console.log(`TOTAL OCCURRENCES IN SYSTEM: ${allOccs.length}`);
+
+    // Sort by date (newest first)
+    allOccs.sort((a, b) => {
+      const dateA = a.date ? new Date(a.date).getTime() : 0;
+      const dateB = b.date ? new Date(b.date).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    // Get newest 20
+    const newest20 = allOccs.slice(0, 20);
+
+    console.log("NEWEST 20 OCCURRENCES:");
+    console.table(
+      newest20.map((occ) => ({
+        Date: occ.formattedDate,
+        Alarm: occ.name,
+        ID: occ.id,
+        Severity: occ.severity,
+      }))
+    );
+
+    // Return the data for further inspection if needed
+    return newest20;
+  }
   // Tooltip elements
   let refreshButtonEl: HTMLButtonElement;
   let resetButtonEl: HTMLButtonElement;
@@ -1005,6 +1132,10 @@
       });
     });
   });
+  // Expose the debug function to the global scope for testing
+  if (typeof window !== "undefined") {
+    (window as any).debugFetchAllOccurrences = debugFetchAllOccurrences;
+  }
 </script>
 
 <div class="card">
@@ -1107,58 +1238,86 @@
           />
         </div>
         <div class="refresh-container">
-          <button
-            class="refresh ripple"
-            on:click={toggleRefresh}
-            bind:this={refreshButtonEl}
-            aria-label="Refresh data"
-          >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 -960 960 960"
-              aria-hidden="true"
+          <div class="refresh-buttons">
+            <button
+              class="refresh ripple"
+              on:click={toggleRefresh}
+              bind:this={refreshButtonEl}
+              aria-label="Refresh data"
             >
-              <path
-                d="M204-318q-22-38-33-78t-11-82q0-134 93-228t227-94h7l-64-64 56-56 160 160-160 160-56-56 64-64h-7q-100 0-170 70.5T240-478q0 26 6 51t18 49l-60 60ZM481-40 321-200l160-160 56 56-64 64h7q100 0 170-70.5T720-482q0-26-6-51t-18-49l60-60q22 38 33 78t11 82q0 134-93 228t-227 94h-7l64 64-56 56Z"
-              />
-            </svg>
-          </button>
-          <button
-            class="auto-refresh ripple"
-            on:click={resetSelectedOccurrence}
-            bind:this={resetButtonEl}
-            aria-label="Reset occurrence selection"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              height="24px"
-              viewBox="0 -960 960 960"
-              width="24px"
-              fill="#f44336"
-              aria-hidden="true"
-              ><path
-                d="m656-120-56-56 84-84-84-84 56-56 84 84 84-84 56 56-83 84 83 84-56 56-84-83-84 83Zm-176 0q-138 0-240.5-91.5T122-440h82q14 104 92.5 172T480-200q11 0 20.5-.5T520-203v81q-10 1-19.5 1.5t-20.5.5ZM120-560v-240h80v94q51-64 124.5-99T480-840q150 0 255 105t105 255h-80q0-117-81.5-198.5T480-760q-69 0-129 32t-101 88h110v80H120Zm414 190-94-94v-216h80v184l56 56-42 70Z"
-              /></svg
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 -960 960 960"
+                aria-hidden="true"
+              >
+                <path
+                  d="M204-318q-22-38-33-78t-11-82q0-134 93-228t227-94h7l-64-64 56-56 160 160-160 160-56-56 64-64h-7q-100 0-170 70.5T240-478q0 26 6 51t18 49l-60 60ZM481-40 321-200l160-160 56 56-64 64h7q100 0 170-70.5T720-482q0-26-6-51t-18-49l60-60q22 38 33 78t11 82q0 134-93 228t-227 94h-7l64 64-56 56Z"
+                />
+              </svg>
+            </button>
+            <button
+              class="auto-refresh ripple {doAutoRefresh ? 'active' : ''}"
+              on:click={() =>
+                doAutoRefresh ? stopAutoRefresh() : startAutoRefresh()}
+              aria-label={doAutoRefresh
+                ? "Stop auto-refresh"
+                : "Enable auto-refresh"}
             >
-          </button>
-          <button
-            class="refresh ripple export-csv"
-            on:click={exportToCSV}
-            aria-label="Download CSV"
-            bind:this={exportCsvButtonEl}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              height="24px"
-              viewBox="0 -960 960 960"
-              width="24px"
-              fill="#000000"
-              ><path
-                d="M230-360h120v-60H250v-120h100v-60H230q-17 0-28.5 11.5T190-560v160q0 17 11.5 28.5T230-360Zm156 0h120q17 0 28.5-11.5T546-400v-60q0-17-11.5-31.5T506-506h-60v-34h100v-60H426q-17 0-28.5 11.5T386-560v60q0 17 11.5 30.5T426-456h60v36H386v60Zm264 0h60l70-240h-60l-40 138-40-138h-60l70 240ZM160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm0-80h640v-480H160v480Zm0 0v-480 480Z"
-              /></svg
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                height="24px"
+                viewBox="0 -960 960 960"
+                width="24px"
+                fill={doAutoRefresh ? "#4caf50" : "#666"}
+                aria-hidden="true"
+              >
+                <path
+                  d="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 31.5-155.5t86-127Q252-817 325-848.5T480-880q17 0 28.5 11.5T520-840q0 17-11.5 28.5T480-800q-133 0-226.5 93.5T160-480q0 133 93.5 226.5T480-160q133 0 226.5-93.5T800-480q0-17 11.5-28.5T840-520q17 0 28.5 11.5T880-480q0 82-31.5 155T763-197.5q-55 54.5-127.5 86T480-80Zm-40-80v-160q0-17 11.5-28.5T480-360q17 0 28.5 11.5T520-320v160q0 17-11.5 28.5T480-120q-17 0-28.5-11.5T440-160Zm120-200v-160q0-17 11.5-28.5T600-560q17 0 28.5 11.5T640-520v160q0 17-11.5 28.5T600-320q-17 0-28.5-11.5T560-360Zm-240 0v-160q0-17 11.5-28.5T360-560q17 0 28.5 11.5T400-520v160q0 17-11.5 28.5T360-320q-17 0-28.5-11.5T320-360Zm-120-80v-80q0-17 11.5-28.5T240-560q17 0 28.5 11.5T280-520v80q0 17-11.5 28.5T240-400q-17 0-28.5-11.5T200-440Z"
+                />
+              </svg>
+            </button>
+            <button
+              class="auto-refresh ripple"
+              on:click={resetSelectedOccurrence}
+              bind:this={resetButtonEl}
+              aria-label="Reset occurrence selection"
             >
-          </button>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                height="24px"
+                viewBox="0 -960 960 960"
+                width="24px"
+                fill="#f44336"
+                aria-hidden="true"
+                ><path
+                  d="m656-120-56-56 84-84-84-84 56-56 84 84 84-84 56 56-83 84 83 84-56 56-84-83-84 83Zm-176 0q-138 0-240.5-91.5T122-440h82q14 104 92.5 172T480-200q11 0 20.5-.5T520-203v81q-10 1-19.5 1.5t-20.5.5ZM120-560v-240h80v94q51-64 124.5-99T480-840q150 0 255 105t105 255h-80q0-117-81.5-198.5T480-760q-69 0-129 32t-101 88h110v80H120Zm414 190-94-94v-216h80v184l56 56-42 70Z"
+                /></svg
+              >
+            </button>
+            <button
+              class="refresh ripple export-csv"
+              on:click={exportToCSV}
+              aria-label="Download CSV"
+              bind:this={exportCsvButtonEl}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                height="24px"
+                viewBox="0 -960 960 960"
+                width="24px"
+                fill="#000000"
+                ><path
+                  d="M230-360h120v-60H250v-120h100v-60H230q-17 0-28.5 11.5T190-560v160q0 17 11.5 28.5T230-360Zm156 0h120q17 0 28.5-11.5T546-400v-60q0-17-11.5-31.5T506-506h-60v-34h100v-60H426q-17 0-28.5 11.5T386-560v60q0 17 11.5 30.5T426-456h60v36H386v60Zm264 0h60l70-240h-60l-40 138-40-138h-60l70 240ZM160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm0-80h640v-480H160v480Zm0 0v-480 480Z"
+                /></svg
+              >
+            </button>
+          </div>
+          {#if lastRefreshTime}
+            <div class="refresh-timestamp">
+              {getLastRefreshText()}
+            </div>
+          {/if}
         </div>
       </div>
     </div>
