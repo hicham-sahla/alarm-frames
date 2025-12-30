@@ -692,7 +692,7 @@
   {:else}
     <div class="card-header with-actions">
       <h3 class="card-title" data-testid="active-alarms-overview-card-title">
-        Alarm snapshots
+        Alarm frames
       </h3>
       <div class="actions-top">
         <div class="time-adjustment">
